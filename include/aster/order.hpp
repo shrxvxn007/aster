@@ -11,13 +11,30 @@ struct OrderNode {
     OrderNode* prev = nullptr;
 };
 
+// Forward declare PriceLevel (will be defined later)
+struct PriceLevel;
+
 struct Order : public OrderNode {
     OrderId     id;
     Price       price;
     Quantity    qty;
     Timestamp   timestamp;
     Side        side;
-    Order*      pool_next = nullptr;   // free list pointer
+    PriceLevel* level_ptr = nullptr;   // O(1) access to containing price level
+    Order*      pool_next = nullptr;
+};
+
+// Intrusive list node for price levels
+struct PriceLevelNode {
+    PriceLevelNode* next = nullptr;
+    PriceLevelNode* prev = nullptr;
+};
+
+struct PriceLevel : public PriceLevelNode {
+    Price price;
+    IntrusiveList orders;          // orders at this price
+    Quantity total_quantity = 0;   // incremental aggregate
+    uint32_t order_count = 0;      // incremental aggregate
 };
 
 class OrderPool {
@@ -36,6 +53,7 @@ public:
         Order* obj = free_list_;
         free_list_ = free_list_->pool_next;
         obj->next = obj->prev = nullptr;
+        obj->level_ptr = nullptr;
         return obj;
     }
 
@@ -74,23 +92,49 @@ public:
         if (node->next) node->next->prev = node->prev;
         else tail_ = node->prev;
     }
+};
 
-    void transfer_to(IntrusiveList& other) {
-        if (empty()) return;
-        if (other.empty()) {
-            other.head_ = head_;
-            other.tail_ = tail_;
-        } else {
-            other.tail_->next = head_;
-            head_->prev = other.tail_;
-            other.tail_ = tail_;
+// Intrusive list for PriceLevel nodes, sorted by price
+class PriceLevelList {
+public:
+    PriceLevelList() : head_(nullptr), tail_(nullptr) {}
+
+    // Insert level in price order (buy: descending, sell: ascending)
+    template<Side S>
+    void insert(PriceLevel* level) {
+        PriceLevel* cur = head_;
+        PriceLevel* prev = nullptr;
+        while (cur) {
+            if constexpr (S == Side::Buy) {
+                if (level->price > cur->price) break;
+            } else {
+                if (level->price < cur->price) break;
+            }
+            prev = cur;
+            cur = cur->next;
         }
-        head_ = tail_ = nullptr;
+        // insert between prev and cur
+        level->next = cur;
+        level->prev = prev;
+        if (prev) prev->next = level;
+        else head_ = level;
+        if (cur) cur->prev = level;
+        else tail_ = level;
     }
 
+    void remove(PriceLevel* level) {
+        if (level->prev) level->prev->next = level->next;
+        else head_ = level->next;
+        if (level->next) level->next->prev = level->prev;
+        else tail_ = level->prev;
+    }
+
+    PriceLevel* first() const { return head_; }
+    bool empty() const { return head_ == nullptr; }
+
 private:
-    Order* head_;
-    Order* tail_;
+    PriceLevel* head_;
+    PriceLevel* tail_;
 };
 
 } // namespace aster
