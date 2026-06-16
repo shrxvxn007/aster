@@ -9,11 +9,6 @@
 
 namespace aster {
 
-struct PriceLevel {
-    Price price;
-    IntrusiveList orders;
-};
-
 template<Side S>
 class HalfBook {
 public:
@@ -22,7 +17,7 @@ public:
     void add(Order* order);
     Order* cancel(OrderId id);
     bool modify(OrderId id, Quantity new_qty, Price new_price, Timestamp new_ts);
-    bool reduce(OrderId id, Quantity new_qty);   // partial fill, keeps time priority
+    bool reduce(OrderId id, Quantity new_qty);
 
     std::optional<Price> best_price() const;
 
@@ -36,13 +31,13 @@ public:
     void clear();
 
 private:
-    using LevelVec = std::vector<PriceLevel>;
-    LevelVec levels_;
+    PriceLevelList levels_;                     // intrusive sorted list of price levels
+    std::unordered_map<Price, PriceLevel*> price_map_; // O(1) price -> level
     OrderPool& pool_;
     std::unordered_map<OrderId, Order*> order_lookup_;
 
-    int find_level(Price price) const;
-    typename LevelVec::iterator insert_level(Price price);
+    // helper: create a new PriceLevel and insert into levels_ and price_map_
+    PriceLevel* create_level(Price price);
 };
 
 class OrderBook {
