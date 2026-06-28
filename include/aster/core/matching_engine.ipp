@@ -72,28 +72,14 @@ inline Qty MatchingEngine<Callback>::match_against_level(LevelQueue& lvl,
 
 template <typename Callback>
 inline void MatchingEngine<Callback>::recompute_ask(SymbolID sym) {
-  OrderBook& book = books_[sym];
-  Price best = kPriceInvalid;
-  const auto* keys = book.levels.keys_data();
-  const auto* meta = book.levels.meta_data();
-  const auto cap = book.levels.capacity_raw();
-  for (std::size_t i = 0; i < cap; ++i) {
-    if (meta[i] == SlotState::Occupied && keys[i] < best) best = keys[i];
-  }
-  book.ask_min = best;
+  // With sorted per-side vectors this is a single front() read. Kept for
+  // debug/invariance checks; no longer on the hot path.
+  books_[sym].refresh_top();
 }
 
 template <typename Callback>
 inline void MatchingEngine<Callback>::recompute_bid(SymbolID sym) {
-  OrderBook& book = books_[sym];
-  Price best = 0;
-  const auto* keys = book.levels.keys_data();
-  const auto* meta = book.levels.meta_data();
-  const auto cap = book.levels.capacity_raw();
-  for (std::size_t i = 0; i < cap; ++i) {
-    if (meta[i] == SlotState::Occupied && keys[i] > best) best = keys[i];
-  }
-  book.best_bid = best;
+  books_[sym].refresh_top();
 }
 
 template <typename Callback>
@@ -118,27 +104,20 @@ bool MatchingEngine<Callback>::add_order(OrderID id, SymbolID sym, Side side,
   if (side == Side::Buy) {
     while (remaining > 0 && book.has_ask() && price >= book.ask_min) {
       LevelQueue* lvl = book.levels.find(book.ask_min);
-      if (!lvl) {
-        recompute_ask(sym);
-        if (!book.has_ask() || price < book.ask_min) break;
-        continue;
-      }
       remaining = match_against_level(*lvl, o, sym, ts);
       if (lvl->empty()) {
-        // Save price before erasing — we need it to erase.
-        Price p = book.ask_min;
-        book.levels.erase(p);
-        recompute_ask(sym);
+        book.erase_price(book.ask_min, Side::Sell);
+        book.levels.erase(book.ask_min);
+        book.refresh_top();
       }
     }
     if (remaining > 0) {
       o->qty_remaining = remaining;
       LevelQueue& lvl = book.levels[price];
       lvl.push_tail(o);
+      book.insert_price(price, side);
+      book.refresh_top();
       order_index_[id] = {sym, o};
-      if (price > book.best_bid) book.best_bid = price;
-      if (price < book.ask_min || book.ask_min == kPriceInvalid)
-        book.ask_min = price;
       callback_.on_accept(*o, ts);
     } else {
       pool_.release(o);
@@ -146,26 +125,20 @@ bool MatchingEngine<Callback>::add_order(OrderID id, SymbolID sym, Side side,
   } else {
     while (remaining > 0 && book.has_bid() && price <= book.best_bid) {
       LevelQueue* lvl = book.levels.find(book.best_bid);
-      if (!lvl) {
-        recompute_bid(sym);
-        if (!book.has_bid() || price > book.best_bid) break;
-        continue;
-      }
       remaining = match_against_level(*lvl, o, sym, ts);
       if (lvl->empty()) {
-        Price p = book.best_bid;
-        book.levels.erase(p);
-        recompute_bid(sym);
+        book.erase_price(book.best_bid, Side::Buy);
+        book.levels.erase(book.best_bid);
+        book.refresh_top();
       }
     }
     if (remaining > 0) {
       o->qty_remaining = remaining;
       LevelQueue& lvl = book.levels[price];
       lvl.push_tail(o);
+      book.insert_price(price, side);
+      book.refresh_top();
       order_index_[id] = {sym, o};
-      if (price < book.ask_min || book.ask_min == kPriceInvalid)
-        book.ask_min = price;
-      if (price > book.best_bid) book.best_bid = price;
       callback_.on_accept(*o, ts);
     } else {
       pool_.release(o);
@@ -194,9 +167,9 @@ Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty, Timestamp ts
       order_index_.erase(o->order_id);
       pool_.release(o);
       if (lvl->empty()) {
+        book.erase_price(o->price, o->side);
         book.levels.erase(o->price);
-        if (o->price == book.best_bid) recompute_bid(o->symbol);
-        if (o->price == book.ask_min) recompute_ask(o->symbol);
+        book.refresh_top();
       }
     }
   }
@@ -221,9 +194,9 @@ bool MatchingEngine<Callback>::cancel_order(OrderID id) {
   if (lvl) {
     lvl->remove(o);  // remove() updates total_qty_ and clears o->in_book.
     if (lvl->empty()) {
+      book.erase_price(o->price, o->side);
       book.levels.erase(o->price);
-      if (o->price == book.best_bid) recompute_bid(sym);
-      if (o->price == book.ask_min) recompute_ask(sym);
+      book.refresh_top();
     }
   }
   order_index_.erase(id);
