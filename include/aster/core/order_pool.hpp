@@ -11,6 +11,12 @@
 #include <cstdint>
 #include <vector>
 
+#if defined(__linux__)
+#  include <sys/mman.h>
+#elif defined(__APPLE__)
+#  include <mach/mach.h>
+#endif
+
 namespace aster {
 
 class OrderPool {
@@ -24,6 +30,20 @@ class OrderPool {
     }
     pool_[capacity - 1].pool_index = kInvalid;
     pool_[capacity - 1].in_book = false;
+
+    // Hint the kernel that we'll stream through this buffer sequentially.
+    // Reduces TLB misses during replay. No-op on macOS (no hugepage ABI)
+    // and on non-Linux platforms.
+#if defined(__linux__)
+    auto* addr = reinterpret_cast<void*>(pool_.data());
+    auto bytes = pool_.size() * sizeof(Order);
+    if (bytes > 0) {
+      // MADV_SEQUENTIAL: expect sequential access; prefetch aggressively.
+      // MADV_HUGETLB would require explicit hugepage allocation (and may
+      // fail); MADV_SEQUENTIAL is the safe, always-succeeds middle ground.
+      madvise(addr, bytes, MADV_SEQUENTIAL);
+    }
+#endif
   }
 
   // Returns nullptr if the pool is exhausted.
