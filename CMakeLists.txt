@@ -13,6 +13,7 @@ endif()
 
 # OBJECT library for shared implementation (no main() functions)
 add_library(aster_obj OBJECT
+  src/core/types.cpp
   src/replay/parser.cpp
   src/replay/replay_engine.cpp
   src/strategy/analytics.cpp

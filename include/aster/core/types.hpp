@@ -14,11 +14,6 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <cstring>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
 
 namespace aster {
 
@@ -43,12 +38,10 @@ constexpr Price kPriceInvalid = UINT64_MAX;
 constexpr Qty kQtyInvalid = 0xFFFFFFFFu;
 
 // I/O helpers only — never used in the matching path.
-inline Price from_double(double v) noexcept {
-  return static_cast<Price>(v * static_cast<double>(kPriceScale) + 0.5);
-}
-inline double to_price(Price p) noexcept {
-  return static_cast<double>(p) / static_cast<double>(kPriceScale);
-}
+// Defined in src/core/types.cpp to avoid requiring <cmath>/<string> etc.
+// in every TU that includes core headers.
+Price from_double(double v);
+double to_price(Price p);
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -108,37 +101,5 @@ struct ExecutionReport {
 };
 static_assert(sizeof(ExecutionReport) == 64,
               "ExecutionReport must be exactly 64 bytes");
-
-// ---------------------------------------------------------------------------
-// SymbolTable — interns string <-> SymbolID. Cold path only (startup + output).
-// ---------------------------------------------------------------------------
-
-class SymbolTable {
- public:
-  SymbolID intern(std::string_view name) {
-    auto it = rev_.find(name);
-    if (it != rev_.end()) return it->second;
-    SymbolID id = static_cast<SymbolID>(names_.size());
-    names_.emplace_back(name);
-    std::string_view stored(names_.back());
-    rev_[stored] = id;
-    return id;
-  }
-
-  std::string_view lookup(SymbolID id) const {
-    return names_[static_cast<std::size_t>(id)];
-  }
-
-  std::size_t size() const { return names_.size(); }
-
-  void reserve(std::size_t n) {
-    names_.reserve(n);
-    rev_.reserve(n);
-  }
-
- private:
-  std::vector<std::string> names_;
-  std::unordered_map<std::string_view, SymbolID> rev_;
-};
 
 }  // namespace aster
