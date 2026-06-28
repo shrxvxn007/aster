@@ -182,7 +182,10 @@ class flat_hash_map {
   const SlotState* meta_data() const noexcept { return meta_.data(); }
   size_type capacity_raw() const noexcept { return keys_.size(); }
 
-  // Callback-based iteration over occupied slots. Simpler than a full iterator.
+  // Callback-based iteration over occupied slots. Simpler than a full
+  // iterator. noexcept: std::vector data access and the user callback are
+  // not marked noexcept, so this is not unconditionally noexcept — but it
+  // is on the hot path and never throws on its own.
   template <typename F>
   void for_each(F&& f) const {
     for (size_type i = 0; i < keys_.size(); ++i) {

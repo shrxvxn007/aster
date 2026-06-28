@@ -56,18 +56,18 @@ class MatchingEngine {
   // Adds an order. Matches against the opposite side; rests any residual.
   // Returns false if the pool is exhausted or the order is invalid.
   [[nodiscard]] bool add_order(OrderID id, SymbolID sym, Side side, Price price,
-                               Qty qty, Timestamp ts);
+                               Qty qty, Timestamp ts) noexcept;
 
   // Cancels an order by ID. O(1) via lookup map + intrusive list splice.
-  [[nodiscard]] bool cancel_order(OrderID id);
+  [[nodiscard]] bool cancel_order(OrderID id) noexcept;
 
   // Modifies an order. Cancel + re-add semantics: loses queue priority.
-  [[nodiscard]] bool modify_order(OrderID id, Price new_price, Qty new_qty);
+  [[nodiscard]] bool modify_order(OrderID id, Price new_price, Qty new_qty) noexcept;
 
   // Historical execution: removes `qty` from the resting order `id`. If the fill
   // completes the order, the order is removed from the book and pool. Returns
   // the qty actually filled. Returns 0 if the order is not in the book.
-  [[nodiscard]] Qty execute_order(OrderID id, Qty qty, Timestamp ts);
+  [[nodiscard]] Qty execute_order(OrderID id, Qty qty, Timestamp ts) noexcept;
 
   Price best_bid(SymbolID s) const {
     if (s >= books_.size()) return 0;
@@ -98,16 +98,16 @@ class MatchingEngine {
   }
 
   // Execute against a resting order. Returns unfilled qty (0 if fully filled).
-  Qty execute_order_impl(Order* o, Qty qty, Timestamp ts);
+  Qty execute_order_impl(Order* o, Qty qty, Timestamp ts) noexcept;
 
  private:
   // Match `agg` (aggressor) against the FIFO queue at one price level.
   // Returns the aggressor's remaining qty.
   Qty match_against_level(LevelQueue& lvl, Order* agg, SymbolID sym,
-                          Timestamp ts);
+                          Timestamp ts) noexcept;
 
-  void recompute_ask(SymbolID sym);
-  void recompute_bid(SymbolID sym);
+  void recompute_ask(SymbolID sym) noexcept;
+  void recompute_bid(SymbolID sym) noexcept;
 
   std::vector<OrderBook> books_;
   OrderPool pool_;

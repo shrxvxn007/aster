@@ -51,6 +51,7 @@ class Analytics {
   double sharpe_ratio() const noexcept;
   double sortino_ratio() const noexcept;
   double turnover() const noexcept { return total_turnover_; }
+  std::uint64_t fill_count() const noexcept { return total_fills_; }
 
   // Adverse selection: fraction of fills that were "toxic" (mid moved
   // against the position within the lookback window).

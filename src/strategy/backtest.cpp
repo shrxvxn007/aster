@@ -106,7 +106,7 @@ void Backtest::handle_execute(const replay::OrderExecuteMsg& m,
                               Timestamp recv_ts) {
   // The engine has the resting order. engine_.execute_order emits fill reports
   // via on_fill and updates the book.
-  engine_.execute_order(m.order_id, m.qty, m.timestamp);
+  (void)engine_.execute_order(m.order_id, m.qty, m.timestamp);
 
   // Update queue tracker for other agent orders at the same price.
   const Order* o = engine_.find_order(m.order_id);
@@ -184,7 +184,7 @@ void Backtest::cancel_quotes(SymbolID sym, Timestamp /*recv_ts*/) {
   for (OrderID id : ids) {
     tracker_.remove(id);
     is_agent_order_.erase(id);
-    engine_.cancel_order(id);
+    (void)engine_.cancel_order(id);
   }
   ids.clear();
 }

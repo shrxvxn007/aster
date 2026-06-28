@@ -67,8 +67,8 @@ class OrderPool {
     --size_;
   }
 
-  Order* by_index(std::uint32_t i) { return &pool_[i]; }
-  const Order* by_index(std::uint32_t i) const { return &pool_[i]; }
+  Order* by_index(std::uint32_t i) noexcept { return &pool_[i]; }
+  const Order* by_index(std::uint32_t i) const noexcept { return &pool_[i]; }
 
   std::uint32_t size() const noexcept { return size_; }
   std::uint32_t capacity() const noexcept {

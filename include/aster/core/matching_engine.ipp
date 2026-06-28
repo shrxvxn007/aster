@@ -13,7 +13,7 @@ template <typename Callback>
 inline Qty MatchingEngine<Callback>::match_against_level(LevelQueue& lvl,
                                                           Order* agg,
                                                           SymbolID sym,
-                                                          Timestamp ts) {
+                                                          Timestamp ts) noexcept {
   Qty remaining = agg->qty_remaining;
   while (remaining > 0 && !lvl.empty()) {
     Order* maker = lvl.head();
@@ -71,20 +71,21 @@ inline Qty MatchingEngine<Callback>::match_against_level(LevelQueue& lvl,
 }
 
 template <typename Callback>
-inline void MatchingEngine<Callback>::recompute_ask(SymbolID sym) {
+inline void MatchingEngine<Callback>::recompute_ask(SymbolID sym) noexcept {
   // With sorted per-side vectors this is a single front() read. Kept for
   // debug/invariance checks; no longer on the hot path.
   books_[sym].refresh_top();
 }
 
 template <typename Callback>
-inline void MatchingEngine<Callback>::recompute_bid(SymbolID sym) {
+inline void MatchingEngine<Callback>::recompute_bid(SymbolID sym) noexcept {
   books_[sym].refresh_top();
 }
 
 template <typename Callback>
 bool MatchingEngine<Callback>::add_order(OrderID id, SymbolID sym, Side side,
-                                         Price price, Qty qty, Timestamp ts) {
+                                         Price price, Qty qty,
+                                         Timestamp ts) noexcept {
   if (qty == 0 || sym >= books_.size()) return false;
   Order* o = pool_.acquire();
   if (!o) return false;
@@ -148,7 +149,8 @@ bool MatchingEngine<Callback>::add_order(OrderID id, SymbolID sym, Side side,
 }
 
 template <typename Callback>
-Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty, Timestamp ts) {
+Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty,
+                                                 Timestamp ts) noexcept {
   if (qty == 0) return 0;
   Qty fill_qty = qty < o->qty_remaining ? qty : o->qty_remaining;
   OrderID cp = o->order_id;  // counterparty = the order itself (historical fill)
@@ -177,14 +179,15 @@ Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty, Timestamp ts
 }
 
 template <typename Callback>
-Qty MatchingEngine<Callback>::execute_order(OrderID id, Qty qty, Timestamp ts) {
+Qty MatchingEngine<Callback>::execute_order(OrderID id, Qty qty,
+                                            Timestamp ts) noexcept {
   auto* p = order_index_.find(id);
   if (!p) return 0;
   return execute_order_impl(p->second, qty, ts);
 }
 
 template <typename Callback>
-bool MatchingEngine<Callback>::cancel_order(OrderID id) {
+bool MatchingEngine<Callback>::cancel_order(OrderID id) noexcept {
   auto* p = order_index_.find(id);
   if (!p) return false;
   SymbolID sym = p->first;
@@ -206,7 +209,7 @@ bool MatchingEngine<Callback>::cancel_order(OrderID id) {
 
 template <typename Callback>
 bool MatchingEngine<Callback>::modify_order(OrderID id, Price new_price,
-                                            Qty new_qty) {
+                                            Qty new_qty) noexcept {
   if (new_qty == 0) {
     return cancel_order(id);
   }
