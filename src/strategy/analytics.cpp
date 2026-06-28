@@ -66,6 +66,10 @@ void Analytics::on_fill(const ExecutionReport& r, bool is_agent_taker,
   s.inventory = new_inv;
   total_turnover_ += static_cast<double>(r.qty);
 
+  // Append to equity curve AFTER PnL/equity bookkeeping so net_pnl() is
+  // current.
+  equity_curve_.push_back({ts, net_pnl()});
+
   // Adverse selection: record this fill and classify any pending fills
   // whose lookback window has expired.
   ++total_fills_;
@@ -172,19 +176,13 @@ void Analytics::print(std::FILE* out) const {
 }
 
 void Analytics::write_pnl_csv(const std::string& path) const {
-  // Simplified: just write a single summary row. A full implementation would
-  // track the equity curve over time.
+  // Full equity-curve time series: one row per fill.
   std::ofstream out(path);
   if (!out) return;
-  out << "metric,value\n";
-  out << "realized_pnl," << total_realized_ << "\n";
-  out << "unrealized_pnl," << total_unrealized_ << "\n";
-  out << "fees," << total_fees_ << "\n";
-  out << "net_pnl," << net_pnl() << "\n";
-  out << "max_drawdown," << max_drawdown_ << "\n";
-  out << "sharpe," << sharpe_ratio() << "\n";
-  out << "sortino," << sortino_ratio() << "\n";
-  out << "turnover," << total_turnover_ << "\n";
+  out << "timestamp_ns,equity\n";
+  for (const auto& [ts, eq] : equity_curve_) {
+    out << ts << ',' << eq << '\n';
+  }
 }
 
 }  // namespace aster::strategy

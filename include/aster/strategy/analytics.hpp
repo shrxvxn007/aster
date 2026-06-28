@@ -67,10 +67,18 @@ class Analytics {
   std::uint64_t total_fills() const noexcept { return total_fills_; }
   std::uint64_t fill_events() const noexcept { return total_fills_; }
 
+  // Equity curve: list of (timestamp_ns, net_pnl) per fill. Appended in on_fill.
+  const std::vector<std::pair<Timestamp, double>>& equity_curve() const
+      noexcept {
+    return equity_curve_;
+  }
+
   // Print summary.
   void print(std::FILE* out = stdout) const;
 
-  // Write PnL curve CSV.
+  // Write full equity-curve time-series CSV: rows of
+  //   timestamp_ns,equity
+  // per fill, replacing the previous summary-only output.
   void write_pnl_csv(const std::string& path) const;
 
  private:
@@ -87,6 +95,9 @@ class Analytics {
   std::uint64_t return_count_ = 0;
   double last_equity_ = 0.0;
   double last_mid_ = 0.0;
+
+  // Equity curve time-series: (timestamp_ns, net_pnl) per fill.
+  std::vector<std::pair<Timestamp, double>> equity_curve_;
 
   // Adverse selection tracking.
   std::uint64_t total_fills_ = 0;
