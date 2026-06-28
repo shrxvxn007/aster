@@ -12,6 +12,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -181,6 +182,168 @@ class flat_hash_map {
   const K* keys_data() const noexcept { return keys_.data(); }
   const SlotState* meta_data() const noexcept { return meta_.data(); }
   size_type capacity_raw() const noexcept { return keys_.size(); }
+
+  // Iterator over occupied slots. Skips Empty/Deleted slots on increment.
+  // The returned value_type is (const K&, V&) — matching the standard map
+  // interface.
+  class iterator {
+   public:
+    using value_type = std::pair<const K&, V&>;
+    using reference = value_type;
+    using pointer = void;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category = std::forward_iterator_tag;
+
+    iterator() noexcept = default;
+    iterator(const iterator&) noexcept = default;
+    iterator& operator=(const iterator&) noexcept = default;
+
+    reference operator*() const noexcept {
+      return {map_->keys_[idx_], map_->vals_[idx_]};
+    }
+    iterator& operator++() noexcept {
+      advance();
+      return *this;
+    }
+    iterator operator++(int) noexcept {
+      iterator tmp = *this;
+      advance();
+      return tmp;
+    }
+    bool operator==(const iterator& o) const noexcept {
+      return idx_ == o.idx_ && map_ == o.map_;
+    }
+    bool operator!=(const iterator& o) const noexcept {
+      return !(*this == o);
+    }
+
+   private:
+    friend class flat_hash_map;
+    friend class const_iterator;
+    iterator(const flat_hash_map* m, size_type i) noexcept
+        : map_(const_cast<flat_hash_map*>(m)), idx_(i) {}
+
+    void advance() noexcept {
+      const auto n = map_->keys_.size();
+      do {
+        if (idx_ + 1 < n) {
+          ++idx_;
+        } else {
+          idx_ = n;
+          return;
+        }
+      } while (map_->meta_[idx_] != SlotState::Occupied);
+    }
+
+    flat_hash_map* map_ = nullptr;
+    size_type idx_ = 0;
+  };
+
+  class const_iterator {
+   public:
+    using value_type = std::pair<const K&, const V&>;
+    using reference = value_type;
+    using pointer = void;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category = std::forward_iterator_tag;
+
+    const_iterator() noexcept = default;
+    const_iterator(const const_iterator&) noexcept = default;
+    const_iterator& operator=(const const_iterator&) noexcept = default;
+
+    // Construct from iterator (enables non-const → const conversion).
+    const_iterator(const iterator& o) noexcept : map_(o.map_), idx_(o.idx_) {}
+
+    reference operator*() const noexcept {
+      return {map_->keys_[idx_], map_->vals_[idx_]};
+    }
+    const_iterator& operator++() noexcept {
+      advance();
+      return *this;
+    }
+    const_iterator operator++(int) noexcept {
+      const_iterator tmp = *this;
+      advance();
+      return tmp;
+    }
+    bool operator==(const const_iterator& o) const noexcept {
+      return idx_ == o.idx_ && map_ == o.map_;
+    }
+    bool operator!=(const const_iterator& o) const noexcept {
+      return !(*this == o);
+    }
+
+   private:
+    friend class flat_hash_map;
+    friend class iterator;
+    const_iterator(const flat_hash_map* m, size_type i) noexcept
+        : map_(m), idx_(i) {}
+
+    void advance() noexcept {
+      const auto n = map_->keys_.size();
+      do {
+        if (idx_ + 1 < n) {
+          ++idx_;
+        } else {
+          idx_ = n;
+          return;
+        }
+      } while (map_->meta_[idx_] != SlotState::Occupied);
+    }
+
+    const flat_hash_map* map_ = nullptr;
+    size_type idx_ = 0;
+  };
+
+  iterator begin() noexcept {
+    if (keys_.empty()) return iterator(this, 0);
+    if (meta_[0] == SlotState::Occupied) return iterator(this, 0);
+    iterator it(this, 0);
+    it.advance();
+    return it;
+  }
+  iterator end() noexcept { return iterator(this, keys_.size()); }
+
+  const_iterator begin() const noexcept {
+    return const_iterator(
+        const_cast<flat_hash_map*>(this)->begin());
+  }
+  const_iterator end() const noexcept {
+    return const_iterator(
+        const_cast<flat_hash_map*>(this)->end());
+  }
+  const_iterator cbegin() const noexcept { return begin(); }
+  const_iterator cend() const noexcept { return end(); }
+
+  // Throwing lookup that throws std::out_of_range when the key is missing.
+  V& at(const K& k) {
+    auto* p = find(k);
+    if (!p) throw std::out_of_range("flat_hash_map::at: key not found");
+    return *p;
+  }
+  const V& at(const K& k) const {
+    auto* p = const_cast<flat_hash_map*>(this)->find(k);
+    if (!p) throw std::out_of_range("flat_hash_map::at: key not found");
+    return *p;
+  }
+
+  // Erase by iterator. Returns iterator to the next occupied slot.
+  iterator erase(iterator pos) {
+    if (pos == end()) return end();
+    size_type idx = pos.idx_;
+    // Reuse erase_at for the backward-shift deletion.
+    erase_at(idx);
+    --size_;
+    --occupied_;
+    // Return iterator at the same index (which now holds the next element
+    // or is empty/deleted — advance to the next occupied).
+    iterator next(this, idx);
+    if (idx < keys_.size() && meta_[idx] == SlotState::Occupied) {
+      return next;
+    }
+    next.advance();
+    return next;
+  }
 
   // Callback-based iteration over occupied slots. Simpler than a full
   // iterator. noexcept: std::vector data access and the user callback are
