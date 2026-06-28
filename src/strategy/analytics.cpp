@@ -17,7 +17,8 @@ void Analytics::ensure_symbol(SymbolID sym) {
   }
 }
 
-void Analytics::on_fill(const ExecutionReport& r, bool is_agent_taker) {
+void Analytics::on_fill(const ExecutionReport& r, bool is_agent_taker,
+                        Timestamp ts) {
   ensure_symbol(r.symbol);
   auto& s = symbols_[static_cast<std::size_t>(r.symbol)];
   double price = to_price(r.price);
@@ -65,6 +66,15 @@ void Analytics::on_fill(const ExecutionReport& r, bool is_agent_taker) {
   s.inventory = new_inv;
   total_turnover_ += static_cast<double>(r.qty);
 
+  // Adverse selection: record this fill and classify any pending fills
+  // whose lookback window has expired.
+  ++total_fills_;
+  pending_fills_.push_back(
+      {r.symbol, ts, price, r.side,
+       (r.side == Side::Buy) ? static_cast<std::int64_t>(r.qty)
+                              : -static_cast<std::int64_t>(r.qty)});
+  classify_pending(ts);
+
   // Update equity and drawdown.
   double equity = net_pnl();
   if (equity > peak_equity_) peak_equity_ = equity;
@@ -86,6 +96,28 @@ void Analytics::mark_to_market(SymbolID sym, double mid_price) {
   ensure_symbol(sym);
   auto& s = symbols_[static_cast<std::size_t>(sym)];
   s.last_mid = mid_price;
+
+  // Classify pending fills for this symbol: if mid moved against the fill
+  // by more than tick_size, it was toxic (adverse selection).
+  for (auto it = pending_fills_.begin(); it != pending_fills_.end();) {
+    if (it->symbol != sym) {
+      ++it;
+      continue;
+    }
+    double mid_move = (it->side == Side::Buy)
+                          ? (mid_price - it->fill_price)
+                          : (it->fill_price - mid_price);
+    if (mid_move < -s.tick_size) {
+      // Mid moved against us: toxic fill.
+      double cost = std::abs(mid_move) * static_cast<double>(std::abs(it->qty));
+      toxic_cost_ += cost;
+      ++toxic_fills_;
+      it = pending_fills_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
   // Recompute unrealized PnL.
   total_unrealized_ = 0.0;
   for (const auto& ss : symbols_) {
@@ -93,6 +125,15 @@ void Analytics::mark_to_market(SymbolID sym, double mid_price) {
       total_unrealized_ +=
           (ss.last_mid - ss.avg_entry) * static_cast<double>(ss.inventory);
     }
+  }
+}
+
+void Analytics::classify_pending(Timestamp now) {
+  // Drop fills whose lookback window has expired without a mid update —
+  // they can't be classified, so we treat them as non-toxic.
+  while (!pending_fills_.empty() &&
+         (now - pending_fills_.front().fill_ts) > kToxicLookbackNs) {
+    pending_fills_.pop_front();
   }
 }
 
@@ -123,6 +164,11 @@ void Analytics::print(std::FILE* out) const {
   std::fprintf(out, "  Sharpe:         %.4f\n", sharpe_ratio());
   std::fprintf(out, "  Sortino:        %.4f\n", sortino_ratio());
   std::fprintf(out, "  Turnover:       %.2f\n", total_turnover_);
+  std::fprintf(out, "  Toxic fills:    %llu / %llu (%.1f%%)\n",
+               static_cast<unsigned long long>(toxic_fills_),
+               static_cast<unsigned long long>(total_fills_),
+               toxic_fill_ratio() * 100.0);
+  std::fprintf(out, "  Avg toxic cost: %.6f\n", avg_toxic_cost());
 }
 
 void Analytics::write_pnl_csv(const std::string& path) const {

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -31,8 +32,10 @@ class Analytics {
  public:
   explicit Analytics(AnalyticsConfig config = {}) : config_(config) {}
 
-  // Process a fill report.
-  void on_fill(const ExecutionReport& r, bool is_agent_taker);
+  // Process a fill report. `ts` is the fill timestamp (used for adverse
+  // selection lookback windowing).
+  void on_fill(const ExecutionReport& r, bool is_agent_taker,
+               Timestamp ts = 0);
 
   // Mark-to-market update using current mid price.
   void mark_to_market(SymbolID sym, double mid_price);
@@ -48,6 +51,21 @@ class Analytics {
   double sharpe_ratio() const noexcept;
   double sortino_ratio() const noexcept;
   double turnover() const noexcept { return total_turnover_; }
+
+  // Adverse selection: fraction of fills that were "toxic" (mid moved
+  // against the position within the lookback window).
+  double toxic_fill_ratio() const noexcept {
+    return total_fills_ > 0
+               ? static_cast<double>(toxic_fills_) /
+                     static_cast<double>(total_fills_)
+               : 0.0;
+  }
+  double avg_toxic_cost() const noexcept {
+    return toxic_fills_ > 0 ? toxic_cost_ / static_cast<double>(toxic_fills_)
+                            : 0.0;
+  }
+  std::uint64_t total_fills() const noexcept { return total_fills_; }
+  std::uint64_t fill_events() const noexcept { return total_fills_; }
 
   // Print summary.
   void print(std::FILE* out = stdout) const;
@@ -70,6 +88,22 @@ class Analytics {
   double last_equity_ = 0.0;
   double last_mid_ = 0.0;
 
+  // Adverse selection tracking.
+  std::uint64_t total_fills_ = 0;
+  std::uint64_t toxic_fills_ = 0;
+  double toxic_cost_ = 0.0;
+  // Recent fills awaiting a mid update to classify. Traded off after the
+  // lookback window expires.
+  struct PendingFill {
+    SymbolID symbol;
+    Timestamp fill_ts;
+    double fill_price;
+    Side side;         // agent's side on this fill
+    std::int64_t qty;  // signed: +buy, -sell
+  };
+  std::deque<PendingFill> pending_fills_;
+  static constexpr std::uint64_t kToxicLookbackNs = 100'000'000ULL;  // 100 ms
+
   // Per-symbol state.
   struct SymState {
     std::int64_t inventory = 0;
@@ -77,10 +111,12 @@ class Analytics {
     double realized = 0.0;
     double fees = 0.0;
     double last_mid = 0.0;
+    double tick_size = 0.0001;  // minimum price increment for toxic check
   };
   std::vector<SymState> symbols_;
 
   void ensure_symbol(SymbolID sym);
+  void classify_pending(Timestamp now);
 };
 
 }  // namespace aster::strategy
