@@ -269,21 +269,19 @@ class flat_hash_map {
 
  private:
   void erase_at(size_type idx) {
-    // Destroy value if non-trivial.
-    if constexpr (!std::is_trivially_destructible_v<V>) vals_[idx].~V();
-    if constexpr (!std::is_trivially_destructible_v<K>) keys_[idx].~K();
+    // Storage is std::vector<K>/std::vector<V>, so elements are always alive.
+    // We must NOT explicitly call destructors here (the vector owns the
+    // elements); instead we move-assign to vacate and rely on move semantics
+    // to leave the source in a valid (moved-from) state that the vector's own
+    // destructor can safely tear down.
 
-    // Backward-shift deletion: move subsequent occupied slots back into this
-    // empty slot until we hit an Empty state.
     const size_type mask = keys_.size() - 1;
     size_type vacant = idx;
     size_type i = (idx + 1) & mask;
     while (meta_[i] != SlotState::Empty) {
       if (meta_[i] == SlotState::Occupied) {
         size_type natural = hash_key(keys_[i]) & mask;
-        // Can `i` fill `vacant`? Either natural <= vacant < i (wrap occurred)
-        // OR vacant < i < natural (wrap the other way) OR i < natural <= vacant.
-        // Equivalent: vacant is NOT in (natural, i].
+        // Can `i` fill `vacant`? vacant is NOT in (natural, i].
         bool can_move;
         if (vacant < i) {
           can_move = !(natural > vacant && natural <= i);
@@ -293,8 +291,6 @@ class flat_hash_map {
         if (can_move) {
           keys_[vacant] = std::move(keys_[i]);
           vals_[vacant] = std::move(vals_[i]);
-          if constexpr (!std::is_trivially_destructible_v<V>) vals_[i].~V();
-          if constexpr (!std::is_trivially_destructible_v<K>) keys_[i].~K();
           meta_[vacant] = SlotState::Occupied;
           meta_[i] = SlotState::Empty;
           vacant = i;
@@ -302,6 +298,11 @@ class flat_hash_map {
       }
       i = (i + 1) & mask;
     }
+    // Clear the final vacated slot to a clean default so the vector's
+    // destructor doesn't double-free any heap data still referenced by a
+    // previously-moved-from element.
+    keys_[vacant] = K{};
+    vals_[vacant] = V{};
     meta_[vacant] = SlotState::Empty;
   }
 };
