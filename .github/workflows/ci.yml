@@ -1,0 +1,72 @@
+# Aster CI: build + test on Ubuntu and macOS, Debug (sanitizers) and
+# Release. Also runs a loose throughput floor check in Release.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+        exclude:
+          # Sanitizers are slow; only run Debug on Linux to keep CI fast.
+          - os: macos-latest
+            build_type: Debug
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+  # Loose throughput floor check — only on Linux Release to avoid CI
+  # flakiness from shared macOS runners.
+  perf-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Run throughput floor check
+        working-directory: build
+        run: |
+          output=$(./aster/aster_sim --events 1000000)
+          echo "$output"
+          # Extract the "Throughput: X.XX M events/sec" line.
+          throughput=$(echo "$output" | awk '/Throughput:/{print $2}')
+          if [ -z "$throughput" ]; then
+            echo "Failed to parse throughput"
+            exit 1
+          fi
+          # Floor: 10 M events/s. Loose to avoid flakiness on shared runners.
+          floor=10.0
+          cmp=$(echo "$throughput $floor" | awk '{if ($1 >= $2) print "ok"; else print "fail"}')
+          if [ "$cmp" != "ok" ]; then
+            echo "Throughput $throughput M events/s below floor $floor M events/s"
+            exit 1
+          fi
+          echo "Throughput floor check passed: $throughput M events/s >= $floor M events/s"
