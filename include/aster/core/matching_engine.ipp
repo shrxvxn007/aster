@@ -19,24 +19,17 @@ inline Qty MatchingEngine<Callback>::match_against_level(LevelQueue& lvl,
     Order* maker = lvl.head();
     Qty fill_qty = remaining < maker->qty_remaining ? remaining
                                                     : maker->qty_remaining;
-    // Emit two fill reports (taker + maker).
-    // Note: designated initializers cannot be used with bitfields in C++20,
-    // so we use positional aggregate initialization here.
-    ExecutionReport tr{
-        sym,                           // symbol
-        {},                            // pad0
-        agg->order_id,                 // order_id
-        maker->order_id,               // counterparty
-        maker->price,                  // price
-        fill_qty,                      // qty
-        {},                            // pad1
-        agg->side,                     // side (bitfield)
-        EventType::Fill,               // type (bitfield)
-        {},                            // pad2
-        {},                            // pad3
-        ts,                            // timestamp
-        ts,                            // recv_timestamp
-    };
+    // Emit one fill report per match, keyed by the resting (maker) side.
+    // The aggressor observes its own unfilled residual via add_order's
+    // return value (matches execute_order_impl's contract: one on_fill
+    // per fill). The counterparty field identifies the taker for the
+    // rare caller that needs to reconstruct both sides of the trade. The
+    // previous two-emit pattern (taker + maker) caused `cb.fill_count`
+    // to grow at 2x the number of trades, breaking tests/keyed indices
+    // AND double-counting analytics for non-agent trades (both sides of
+    // the same trade were charged the taker fee). Note: designated
+    // initializers cannot be used with bitfields in C++20, so we use
+    // positional aggregate initialization here.
     ExecutionReport mr{
         sym,                           // symbol
         {},                            // pad0
@@ -52,7 +45,6 @@ inline Qty MatchingEngine<Callback>::match_against_level(LevelQueue& lvl,
         ts,                            // timestamp
         ts,                            // recv_timestamp
     };
-    callback_.on_fill(tr);
     callback_.on_fill(mr);
     remaining -= fill_qty;
     agg->qty_remaining = remaining;
