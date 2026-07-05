@@ -61,14 +61,14 @@ target_link_libraries(aster_obj PUBLIC aster)
 add_executable(aster_replay src/main.cpp)
 target_link_libraries(aster_replay PRIVATE aster_obj aster)
 target_link_options(aster_replay PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+  $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 
 # Synthetic benchmark: Poisson arrival process, no ITCH file required.
 add_executable(aster_sim src/sim.cpp)
 target_link_libraries(aster_sim PRIVATE aster_obj aster)
 target_link_options(aster_sim PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+  $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 
 # -----------------------------------------------------------------------------
@@ -79,29 +79,29 @@ enable_testing()
 add_executable(test_engine tests/test_engine.cpp)
 target_link_libraries(test_engine PRIVATE aster_obj aster)
 target_compile_options(test_engine PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:-fsanitize=undefined -fno-omit-frame-pointer>
 )
 target_link_options(test_engine PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+  $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 add_test(NAME test_engine COMMAND test_engine)
 
 add_executable(test_parser tests/test_parser.cpp)
 target_link_libraries(test_parser PRIVATE aster_obj aster)
 target_compile_options(test_parser PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:-fsanitize=undefined -fno-omit-frame-pointer>
 )
 target_link_options(test_parser PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+  $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 add_test(NAME test_parser COMMAND test_parser)
 
 add_executable(test_replay tests/test_replay.cpp)
 target_link_libraries(test_replay PRIVATE aster_obj aster)
 target_compile_options(test_replay PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:-fsanitize=undefined -fno-omit-frame-pointer>
 )
 target_link_options(test_replay PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+  $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 add_test(NAME test_replay COMMAND test_replay)

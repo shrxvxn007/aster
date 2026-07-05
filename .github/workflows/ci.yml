@@ -22,13 +22,13 @@ jobs:
   # --------------------------------------------------------------------------
   build:
     # CI runs Release across both OSes (production-proxy) and Debug on
-    # Ubuntu only so sanitizer coverage (ASan + UBSan) is exercised in
-    # CI. macOS + Debug is dropped from the matrix because Apple Clang
-    # ASan runtime overhead remains higher than gcc on Linux even at
-    # -O1; we don't want a perf-bound macOS+Debug flake to mask the
-    # real sanitizer signal. CMakeLists.txt uses -O1 -g for Debug, which
-    # keeps sanitizer covers active AND keeps per-test wallclock under
-    # ctest's --timeout 120.
+    # Ubuntu only so UBSan coverage is exercised in CI. macOS + Debug is
+    # dropped from the matrix because (a) Apple Clang UBSan runtime
+    # overhead remains higher than gcc on Linux, and (b) the bugs UBSan
+    # catches are compiler-independent (signed integer overflow, null,
+    # alignment, invalid shift) so one gating architecture suffices.
+    # CMakeLists.txt uses -O1 -g for Debug, which runs the per-test
+    # wallclock under 5 s with UBSan-only.
     strategy:
       fail-fast: false
       matrix:

@@ -1,5 +1,7 @@
 # Aster — C++20 Low-Latency Matching Engine & Market-Making Simulator
 
+[![CI status](ci/badge.svg)](ci/README.md)
+
 Aster is an event-driven limit order book and matching engine with an
 ITCH-style market-data replay harness and an inventory-aware market-making
 strategy. The whole stack is C++20, allocation-free on the critical path,
@@ -16,6 +18,10 @@ The project maps directly to three production-style concerns:
    inventory-aware reservation prices, Poisson fill-probability estimates,
    transaction-cost accounting, adverse-selection detection, full PnL /
    Sharpe / Sortino / drawdown analytics, hard risk limits.
+
+Offline-verifiable CI artifacts (badge, last 3 runs, latest jobs,
+throughput floor mirror) live in [`ci/`](ci/README.md) and are
+refreshed by running `scripts/capture_ci.sh` from the repo root.
 
 ---
 
@@ -38,8 +44,7 @@ build/test_replay    # replay-engine deterministic-order tests
 ```
 
 `Release` configures `-O3 -flto -march=native` and disables
-`<cassert>`. `Debug` enables AddressSanitizer + UBSan and frame
-pointers for diagnosis.
+`<cassert>`. `Debug` enables UBSan and frame pointers for diagnosis.
 
 ---
 
