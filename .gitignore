@@ -1,0 +1,48 @@
+# Build output
+build/
+out/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# CMake scratch / CTest artifacts (Testing/Temporary/CTestCostData.txt etc.)
+Testing/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+.deps/
+.derivatives/
+
+# Profiling / coverage
+*.gcov
+*.gcda
+*.gcno
+callgrind.out.*
+massif.out.*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+*.swo
+.DS_Store
+*.tmp
+*.bak
+
+# Optional local data — large ITCH files should not live in the repo
+*.itch
+*.pcap
+data/
+
+# macOS debug symbols
+*.dSYM/
+
+# CLion / IDE build directories
+cmake-build-debug/
+cmake-build-release/

@@ -3,6 +3,11 @@
 // Inventory-aware quoting: reservation price shifts based on current inventory,
 // and spread widens as |inventory| grows. Quotes are placed at bid/ask around
 // the reservation price.
+//
+// Fill-probability estimation models the market-order arrival stream as a
+// Poisson process with an online exponential-moving-average rate. Given a
+// queue position (volume_ahead) and a lookahead horizon, the probability that
+// our order fills is Poisson CDF: P(≥ volume_ahead shares arrive in horizon).
 
 #pragma once
 
@@ -38,6 +43,27 @@ class MmStrategy {
 
   Quote compute_quote(double mid_price, std::int64_t inventory,
                       double time_remaining) const;
+
+  // Compute a toxicity-adjusted half-spread multiplier. When the recent toxic
+  // fill ratio is high (adverse selection detected), the strategy widens its
+  // spread to compensate for the cost of being adversely selected. Returns a
+  // multiplier >= 1.0 applied to the base half-spread.
+  //
+  //   toxic_ratio in [0, 1]: fraction of recent fills that were toxic.
+  //   The multiplier grows linearly from 1.0 (no toxicity) to
+  //   1.0 + max_toxic_penalty (fully toxic).
+  static double toxicity_spread_multiplier(double toxic_ratio,
+                                           double max_toxic_penalty = 2.0);
+
+  // Estimate the fill probability for an order with `volume_ahead` shares in
+  // front of it, over a lookahead window of `horizon_s` seconds. Models the
+  // market-order arrival rate as `lambda` shares/second. Returns a value
+  // in [0, 1].
+  //
+  // Poisson model: arrivals over horizon ~ Poisson(lambda * horizon).
+  // P(fill) = P(arrivals >= volume_ahead) = 1 - CDF(volume_ahead - 1).
+  static double fill_probability(double volume_ahead, double lambda,
+                                 double horizon_s);
 
   // Access inventory for a symbol.
   std::int64_t inventory(SymbolID sym) const;

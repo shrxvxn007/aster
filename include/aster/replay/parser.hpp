@@ -30,17 +30,24 @@ class ItchParser {
   bool is_open() const { return data_ != nullptr; }
   const std::vector<SymbolEntry>& symbols() const { return symbols_; }
 
-  // Iterate messages. Returns false at end or on error.
+  // Iterate messages. Returns false at end or on error. Call error_count()
+  // after the loop to distinguish a clean end-of-file (0) from a truncated or
+  // corrupt stream (>0).
   bool next(Message& out);
 
   // Number of messages parsed so far.
   std::uint64_t count() const { return count_; }
+
+  // Number of parse errors encountered (truncated/corrupt messages, invalid
+  // fields). A clean replay ends with error_count() == 0.
+  std::size_t error_count() const noexcept;
 
  private:
   void* data_ = nullptr;  // mmap'd buffer
   std::size_t size_ = 0;
   std::size_t pos_ = 0;
   std::uint64_t count_ = 0;
+  std::size_t errors_ = 0;
   std::vector<SymbolEntry> symbols_;
 };
 

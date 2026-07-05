@@ -53,6 +53,11 @@ inline const char* side_name(Side s) noexcept {
   return s == Side::Buy ? "Buy" : "Sell";
 }
 
+enum class OrderType : std::uint8_t {
+  Limit,   // rests on the book if not fully filled
+  Market,  // IOC: sweeps the opposite cancels
+};
+
 // Event types emitted via ExecutionReport.
 enum class EventType : std::uint8_t {
   Fill,

@@ -4,9 +4,7 @@
 
 #include "aster/utils/timestamp.h"
 
-#include <algorithm>
 #include <cassert>
-#include <thread>
 
 #if defined(__APPLE__)
 #  include <time.h>
@@ -30,11 +28,21 @@ std::uint64_t ReplayEngine::run(Profiler* profiler) {
     std::uint64_t exch_ts = 0;
     std::visit([&](const auto& m) { exch_ts = m.timestamp; }, msg);
 
-    // recv_timestamp = exchange timestamp + one-way latency.
-    std::uint64_t recv_ts = exch_ts + config_.latency_exch_to_trader_ns;
+    // recv_timestamp = exchange timestamp + round-trip latency.
+    //   exch→trader  : market data arrival delay
+    //   trader→exch  : outbound order / simulated exchange round-trip delay
+    // Together they model the full latency an agent experiences: the exchange
+    // sends data, the agent observes it late, and its own orders arrive at the
+    // exchange with the configured outbound delay.
+    std::uint64_t recv_ts = exch_ts + config_.latency_exch_to_trader_ns +
+                            config_.latency_trader_to_exch_ns;
 
     if (!has_first) {
       first_ts = exch_ts;
+      // NOTE: RealTime/Scaled mode anchors to wall-clock time, so inter-
+      // message timing is non-deterministic across runs. Dispatch ORDER is
+      // always deterministic (messages are emitted in file order regardless
+      // of mode). For fully deterministic replay, use ReplayConfig::AsFastAsPossible.
       wall_start = now_ns();
       has_first = true;
     }

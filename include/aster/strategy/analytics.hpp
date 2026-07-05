@@ -26,6 +26,8 @@ struct SymbolState {
 struct AnalyticsConfig {
   double maker_fee_per_share = 0.0001;  // exchange credit/debit
   double taker_fee_per_share = 0.0002;
+  double tick_size = 0.0001;            // minimum price increment
+  std::uint64_t toxic_lookback_ns = 100'000'000ULL;  // 100 ms
 };
 
 class Analytics {
@@ -114,7 +116,6 @@ class Analytics {
     std::int64_t qty;  // signed: +buy, -sell
   };
   std::deque<PendingFill> pending_fills_;
-  static constexpr std::uint64_t kToxicLookbackNs = 100'000'000ULL;  // 100 ms
 
   // Per-symbol state.
   struct SymState {
@@ -123,7 +124,6 @@ class Analytics {
     double realized = 0.0;
     double fees = 0.0;
     double last_mid = 0.0;
-    double tick_size = 0.0001;  // minimum price increment for toxic check
   };
   std::vector<SymState> symbols_;
 

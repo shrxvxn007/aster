@@ -14,6 +14,7 @@
 #include "aster/strategy/analytics.hpp"
 #include "aster/strategy/mm_strategy.hpp"
 #include "aster/strategy/queue_tracker.hpp"
+#include "aster/strategy/risk_manager.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -34,6 +35,7 @@ struct BacktestConfig {
   ReplayConfig replay;
   MmParams strategy;
   AnalyticsConfig analytics;
+  RiskLimits risk;
 };
 
 // The Backtest acts as the Callback type for the MatchingEngine.
@@ -64,10 +66,21 @@ class Backtest {
   QueueTracker tracker_;
   Analytics analytics_;
   MmStrategy strategy_;
+  RiskManager risk_;
   ReplayEngine* replay_ = nullptr;
 
   // Agent order ID management.
   OrderID next_agent_id_ = 100'000'000ULL;  // kAgentIdStart, above any historical ID
+
+  // Per-symbol market-order arrival rate (shares/second), EMA-smoothed.
+  // Used by the MM strategy to estimate fill probability when quoting.
+  struct SymbolRate {
+    double lambda = 0.0;          // shares/second EMA
+    Timestamp last_ts = 0;        // last update timestamp
+    bool initialized = false;
+  };
+  std::vector<SymbolRate> rates_;
+  static constexpr double kLambdaAlpha = 0.05;  // EMA smoothing factor
 
   // Track which symbols we've quoted on.
   std::vector<bool> active_symbols_;
@@ -85,11 +98,19 @@ class Backtest {
   void handle_delete(const replay::OrderDeleteMsg& m, Timestamp recv_ts);
   void handle_system(const replay::SystemEventMsg& m, Timestamp recv_ts);
 
+  // Update the per-symbol market-order arrival rate from an execute event.
+  void update_arrival_rate(SymbolID sym, Qty qty, Timestamp ts);
+
   // Quote management.
   void quote_symbol(SymbolID sym, Timestamp recv_ts);
   void cancel_quotes(SymbolID sym, Timestamp recv_ts);
   // Remove a single agent order from the per-symbol tracking (used on fill).
   void forget_agent_order(SymbolID sym, OrderID id);
+
+  // Mark-to-market update: computes current mid for a symbol and feeds it
+  // to analytics so unrealized PnL, adverse selection classification, and
+  // toxic fill ratio reflect tape data in real time.
+  void update_mark_to_market(SymbolID sym);
 };
 
 }  // namespace aster::strategy

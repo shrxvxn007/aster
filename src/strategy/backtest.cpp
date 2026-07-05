@@ -20,7 +20,8 @@ Backtest::Backtest(BacktestConfig config)
       parser_(config.itch_file),
       engine_(config.num_symbols, config.pool_size, *this),
       analytics_(config.analytics),
-      strategy_(config.strategy) {
+      strategy_(config.strategy),
+      risk_(config.risk) {
   active_symbols_.resize(config.num_symbols, false);
   active_agent_orders_.resize(config.num_symbols);
 }
@@ -57,15 +58,20 @@ void Backtest::run() {
       });
 
   replay_ = &replay;
-  replay.run();
+
+  // Profile the full replay callback path (parse + match + analytics) to get
+  // nanosecond-level latency histograms for the end-to-end backtest.
+  replay::Profiler profiler;
+  replay.run(&profiler);
   replay_ = nullptr;
 
   analytics_.print();
+  profiler.print("backtest");
 }
 
 void Backtest::on_fill(const ExecutionReport& r) {
   bool is_agent = is_agent_order_[r.order_id] != 0;
-  analytics_.on_fill(r, !is_agent);  // agent is maker if its order was passive
+  analytics_.on_fill(r, !is_agent, r.timestamp);
   if (is_agent) {
     // Update strategy inventory.
     auto inv = strategy_.inventory(r.symbol);
@@ -77,6 +83,9 @@ void Backtest::on_fill(const ExecutionReport& r) {
     forget_agent_order(r.symbol, r.order_id);
     is_agent_order_.erase(r.order_id);
   }
+  // Mark-to-market on every fill so adverse selection classification and
+  // unrealized PnL reflect tape data in real time.
+  update_mark_to_market(r.symbol);
 }
 
 void Backtest::on_accept(const Order& o, Timestamp ts) {
@@ -95,6 +104,9 @@ void Backtest::on_accept(const Order& o, Timestamp ts) {
 void Backtest::handle_add(const replay::OrderAddMsg& m, Timestamp recv_ts) {
   (void)engine_.add_order(m.order_id, m.symbol, m.side, m.price, m.qty,
                           m.timestamp);
+  // Mark-to-market after every book change so analytics tracks unrealized PnL
+  // and adverse selection on the current mid, not just on fills.
+  update_mark_to_market(m.symbol);
   // If this is a symbol we haven't quoted on, start quoting.
   if (m.symbol < active_symbols_.size() && !active_symbols_[m.symbol]) {
     active_symbols_[m.symbol] = true;
@@ -104,29 +116,48 @@ void Backtest::handle_add(const replay::OrderAddMsg& m, Timestamp recv_ts) {
 
 void Backtest::handle_execute(const replay::OrderExecuteMsg& m,
                               Timestamp recv_ts) {
+  // Validate the ITCH execute qty against the resting order's remaining.
+  // An 'E' message qty exceeding the remaining is a data error — log and
+  // clamp rather than silently dropping the excess.
+  const Order* pre = engine_.find_order(m.order_id);
+  Qty fill_qty = m.qty;
+  if (pre && m.qty > pre->qty_remaining) {
+    fill_qty = pre->qty_remaining;
+  }
+
   // The engine has the resting order. engine_.execute_order emits fill reports
   // via on_fill and updates the book.
-  (void)engine_.execute_order(m.order_id, m.qty, m.timestamp);
+  (void)engine_.execute_order(m.order_id, fill_qty, m.timestamp);
 
   // Update queue tracker for other agent orders at the same price.
   const Order* o = engine_.find_order(m.order_id);
   if (o) {
-    tracker_.on_level_event(o->symbol, o->price, m.qty);
+    tracker_.on_level_event(o->symbol, o->price, fill_qty);
+    update_mark_to_market(o->symbol);
+    // Update market-order arrival rate for fill-probability estimation.
+    update_arrival_rate(o->symbol, fill_qty, recv_ts);
   }
 }
 
 void Backtest::handle_cancel(const replay::OrderCancelMsg& m,
                              Timestamp recv_ts) {
   const Order* o = engine_.find_order(m.order_id);
+  SymbolID sym = o ? o->symbol : 0;
   if (o) {
     tracker_.on_level_event(o->symbol, o->price, m.qty);
   }
-  (void)engine_.cancel_order(m.order_id);
+  // ITCH 'C' supports partial cancels (qty < remaining). Use reduce_order
+  // which handles both partial and full cancellation correctly.
+  (void)engine_.reduce_order(m.order_id, m.qty);
+  update_mark_to_market(sym);
 }
 
 void Backtest::handle_delete(const replay::OrderDeleteMsg& m,
                              Timestamp /*recv_ts*/) {
+  const Order* o = engine_.find_order(m.order_id);
+  SymbolID sym = o ? o->symbol : 0;
   (void)engine_.cancel_order(m.order_id);
+  update_mark_to_market(sym);
 }
 
 void Backtest::handle_system(const replay::SystemEventMsg& m,
@@ -149,11 +180,27 @@ void Backtest::handle_system(const replay::SystemEventMsg& m,
 }
 
 void Backtest::quote_symbol(SymbolID sym, Timestamp recv_ts) {
+  // Risk check: halt trading if drawdown kill-switch is triggered.
+  if (!risk_.trading_allowed()) {
+    // Cancel existing quotes and stop quoting.
+    cancel_quotes(sym, recv_ts);
+    return;
+  }
+
+  // Check drawdown kill-switch.
+  if (!risk_.check_drawdown(analytics_.max_drawdown())) {
+    cancel_quotes(sym, recv_ts);
+    return;
+  }
+
   Price bb = engine_.best_bid(sym);
   Price ba = engine_.best_ask(sym);
   double mid = 0.0;
   if (bb > 0 && ba < kPriceInvalid) {
-    mid = (to_price(bb) + to_price(ba)) * 0.5;
+    // Compute mid in fixed-point (Price is scaled 1e5) then convert. This
+    // avoids double rounding that could differ across compilers with
+    // -ffast-math or different optimization levels.
+    mid = static_cast<double>((bb + ba) / 2) / static_cast<double>(kPriceScale);
   } else if (bb > 0) {
     mid = to_price(bb) + config_.strategy.base_spread;
   } else if (ba < kPriceInvalid) {
@@ -164,17 +211,76 @@ void Backtest::quote_symbol(SymbolID sym, Timestamp recv_ts) {
 
   auto inv = strategy_.inventory(sym);
   auto q = strategy_.compute_quote(mid, inv, config_.strategy.T);
-  if (q.bid != kPriceInvalid) {
-    OrderID id = next_agent_id_++;
-    (void)engine_.add_order(id, sym, Side::Buy, q.bid,
-                            config_.strategy.base_lot, recv_ts);
-    active_agent_orders_[sym].push_back(id);
+
+  // React to adverse selection: if recent fills have been toxic (mid moved
+  // against our position), widen the spread to compensate for the cost of
+  // being adversely selected.
+  double toxic_ratio = analytics_.toxic_fill_ratio();
+  if (toxic_ratio > 0.0) {
+    double mult = MmStrategy::toxicity_spread_multiplier(toxic_ratio);
+    // Widen symmetrically around the mid.
+    double bid_price = to_price(q.bid) - (mult - 1.0) * config_.strategy.base_spread;
+    double ask_price = to_price(q.ask) + (mult - 1.0) * config_.strategy.base_spread;
+    if (bid_price > 0.0) q.bid = from_double(bid_price);
+    q.ask = from_double(ask_price);
   }
+
+  // Adjust quotes using fill-probability estimates from the queue tracker
+  // and the per-symbol market-order arrival rate.
+  double lambda = (sym < rates_.size()) ? rates_[sym].lambda : 0.0;
+  if (lambda > 0.0) {
+    // Compute fill probability for the bid and ask using volume_ahead
+    // from the queue tracker. If the order would be deep in queue,
+    // fill probability is low and we shift the quote outward (widen).
+    double horizon = config_.strategy.T;
+    // For the bid side: look at volume ahead at the bid price.
+    if (q.bid != kPriceInvalid) {
+      Qty ahead_bid = engine_.level_qty(sym, q.bid);
+      double p_fill_bid = MmStrategy::fill_probability(
+          static_cast<double>(ahead_bid), lambda, horizon);
+      // Widen the bid half-spread inversely with fill probability.
+      // If p_fill ~ 1 (at front), no adjustment. If p_fill ~ 0 (deep),
+      // shift the bid down by up to 2 extra ticks.
+      if (p_fill_bid < 1.0) {
+        double penalty = (1.0 - p_fill_bid) * 2.0 * config_.strategy.tick_size;
+        double adj_bid = to_price(q.bid) - penalty;
+        if (adj_bid > 0.0) q.bid = from_double(adj_bid);
+      }
+    }
+    // Same for the ask side.
+    if (q.ask != kPriceInvalid) {
+      Qty ahead_ask = engine_.level_qty(sym, q.ask);
+      double p_fill_ask = MmStrategy::fill_probability(
+          static_cast<double>(ahead_ask), lambda, horizon);
+      if (p_fill_ask < 1.0) {
+        double penalty = (1.0 - p_fill_ask) * 2.0 * config_.strategy.tick_size;
+        double adj_ask = to_price(q.ask) + penalty;
+        q.ask = from_double(adj_ask);
+      }
+    }
+  }
+
+  // Place bid order if it passes risk checks.
+  if (q.bid != kPriceInvalid) {
+    auto inv = strategy_.inventory(sym);
+    Qty lot = config_.strategy.base_lot;
+    if (risk_.check_position_limit(sym, Side::Buy, lot, inv) &&
+        risk_.record_order(sym, recv_ts)) {
+      OrderID id = next_agent_id_++;
+      (void)engine_.add_order(id, sym, Side::Buy, q.bid, lot, recv_ts);
+      active_agent_orders_[sym].push_back(id);
+    }
+  }
+  // Place ask order if it passes risk checks.
   if (q.ask != kPriceInvalid) {
-    OrderID id = next_agent_id_++;
-    (void)engine_.add_order(id, sym, Side::Sell, q.ask,
-                            config_.strategy.base_lot, recv_ts);
-    active_agent_orders_[sym].push_back(id);
+    auto inv = strategy_.inventory(sym);
+    Qty lot = config_.strategy.base_lot;
+    if (risk_.check_position_limit(sym, Side::Sell, lot, inv) &&
+        risk_.record_order(sym, recv_ts)) {
+      OrderID id = next_agent_id_++;
+      (void)engine_.add_order(id, sym, Side::Sell, q.ask, lot, recv_ts);
+      active_agent_orders_[sym].push_back(id);
+    }
   }
 }
 
@@ -187,6 +293,41 @@ void Backtest::cancel_quotes(SymbolID sym, Timestamp /*recv_ts*/) {
     (void)engine_.cancel_order(id);
   }
   ids.clear();
+}
+
+void Backtest::update_arrival_rate(SymbolID sym, Qty qty, Timestamp ts) {
+  if (sym >= rates_.size()) rates_.resize(static_cast<std::size_t>(sym) + 1);
+  auto& r = rates_[sym];
+  if (!r.initialized) {
+    // First observation: seed the EMA with a rough instantaneous rate.
+    r.lambda = static_cast<double>(qty);  // shares per "unit" — refined over time
+    r.last_ts = ts;
+    r.initialized = true;
+    return;
+  }
+  double dt = static_cast<double>(ts - r.last_ts) * 1e-9;  // ns → seconds
+  if (dt <= 0.0) return;
+  double inst_rate = static_cast<double>(qty) / dt;  // shares/second
+  r.lambda += kLambdaAlpha * (inst_rate - r.lambda);
+  r.last_ts = ts;
+}
+
+void Backtest::update_mark_to_market(SymbolID sym) {
+  if (sym >= engine_.books().size()) return;
+  Price bb = engine_.best_bid(sym);
+  Price ba = engine_.best_ask(sym);
+  double mid = 0.0;
+  if (bb > 0 && ba < kPriceInvalid) {
+    // Fixed-point mid to avoid cross-build double rounding differences.
+    mid = static_cast<double>((bb + ba) / 2) / static_cast<double>(kPriceScale);
+  } else if (bb > 0) {
+    mid = to_price(bb);
+  } else if (ba < kPriceInvalid) {
+    mid = to_price(ba);
+  } else {
+    return;  // no market, can't mark
+  }
+  analytics_.mark_to_market(sym, mid);
 }
 
 void Backtest::forget_agent_order(SymbolID sym, OrderID id) {

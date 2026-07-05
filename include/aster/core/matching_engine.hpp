@@ -58,8 +58,21 @@ class MatchingEngine {
   [[nodiscard]] bool add_order(OrderID id, SymbolID sym, Side side, Price price,
                                Qty qty, Timestamp ts) noexcept;
 
+  // Adds a market order (IOC): sweeps the opposite side, matching at each
+  // resting price, then cancels any residual. The price parameter is ignored
+  // (pass kPriceInvalid). Returns false if the pool is exhausted, the order is
+  // invalid, or no market exists (nothing to match against).
+  [[nodiscard]] bool add_market_order(OrderID id, SymbolID sym, Side side,
+                                      Qty qty, Timestamp ts) noexcept;
+
   // Cancels an order by ID. O(1) via lookup map + intrusive list splice.
   [[nodiscard]] bool cancel_order(OrderID id) noexcept;
+
+  // Reduces an order's quantity by `qty_to_reduce`. If the reduction equals or
+  // exceeds the remaining quantity, the order is fully cancelled. Otherwise the
+  // order remains in the book with a reduced qty_remaining. Returns the qty
+  // actually reduced, or 0 if the order was not found.
+  [[nodiscard]] Qty reduce_order(OrderID id, Qty qty_to_reduce) noexcept;
 
   // Modifies an order. Cancel + re-add semantics: loses queue priority.
   [[nodiscard]] bool modify_order(OrderID id, Price new_price, Qty new_qty) noexcept;

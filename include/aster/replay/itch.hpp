@@ -7,10 +7,11 @@
 //
 // Message types (first byte is the type discriminator):
 //   'S' = System Event
-//   'A' = Order Add
-//   'E' = Order Execute
-//   'C' = Order Cancel
-//   'D' = Order Delete
+//   'A' = Order Add (L3)
+//   'E' = Order Execute (L3)
+//   'C' = Order Cancel (L3)
+//   'D' = Order Delete (L3)
+//   'L' = L2 Aggregate (price-level depth update)
 
 #pragma once
 
@@ -77,7 +78,19 @@ struct OrderDeleteMsg {
   OrderID order_id;
 };
 
+// L2 aggregate: a price-level depth update. Reports the total quantity
+// resting at a given price on one side. Used for L2 book reconstruction
+// without replaying every L3 event.
+struct L2AggregateMsg {
+  Timestamp timestamp;
+  SymbolID symbol;
+  Side side;
+  Price price;
+  Qty qty;       // total qty at this price level
+  std::uint32_t order_count;  // number of orders at this level
+};
+
 using Message = std::variant<SystemEventMsg, OrderAddMsg, OrderExecuteMsg,
-                             OrderCancelMsg, OrderDeleteMsg>;
+                             OrderCancelMsg, OrderDeleteMsg, L2AggregateMsg>;
 
 }  // namespace aster::replay

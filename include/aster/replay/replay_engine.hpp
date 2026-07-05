@@ -20,7 +20,13 @@ struct ReplayConfig {
   enum class SpeedMode { RealTime, Batch, Scaled };
   SpeedMode mode = SpeedMode::Batch;
   double speed_factor = 1.0;          // for Scaled mode
-  std::uint64_t latency_exch_to_trader_ns = 0;  // one-way latency injection
+  // One-way latency injection: time for a message to travel from exchange to
+  // the trader's system (applied to all inbound messages).
+  std::uint64_t latency_exch_to_trader_ns = 0;
+  // Trader-to-exchange latency: simulates the outbound round-trip. All
+  // received messages are additionally delayed by this amount so that the
+  // agent observes market data and receives fills/executions as if its own
+  // orders had to travel to the exchange and back.
   std::uint64_t latency_trader_to_exch_ns = 0;
 };
 

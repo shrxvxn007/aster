@@ -67,7 +67,8 @@ ItchParser::ItchParser(const std::filesystem::path& path) {
     if (pos_ >= size_) break;
     std::uint8_t name_len = static_cast<std::uint8_t>(base[pos_]);
     ++pos_;
-    if (pos_ + name_len + 2 > size_) break;
+    // Validate: name must be non-empty and fit within the file.
+    if (name_len == 0 || pos_ + name_len + 2 > size_) break;
     std::string name(reinterpret_cast<const char*>(base + pos_), name_len);
     pos_ += name_len;
     SymbolID id = read_be<SymbolID>(base + pos_);
@@ -83,6 +84,8 @@ ItchParser::~ItchParser() {
     size_ = 0;
   }
 }
+
+std::size_t ItchParser::error_count() const noexcept { return errors_; }
 
 ItchParser::ItchParser(ItchParser&& o) noexcept
     : data_(o.data_), size_(o.size_), pos_(o.pos_), count_(o.count_),
@@ -112,9 +115,10 @@ bool ItchParser::next(Message& out) {
   }
   pos_ += 8;
 
+  bool ok = true;
   switch (type) {
     case 'S': {
-      if (pos_ + 1 > size_) return false;
+      if (pos_ + 1 > size_) { ok = false; break; }
       auto code = static_cast<SystemEventCode>(base[pos_]);
       ++pos_;
       out = SystemEventMsg{ts, code};
@@ -122,7 +126,7 @@ bool ItchParser::next(Message& out) {
     }
     case 'A': {
       // order_id:8, symbol:2, side:1, price:8, qty:4 = 23 bytes
-      if (pos_ + 23 > size_) return false;
+      if (pos_ + 23 > size_) { ok = false; break; }
       OrderID oid = read_be<OrderID>(base + pos_);
       pos_ += 8;
       SymbolID sym = read_be<SymbolID>(base + pos_);
@@ -133,11 +137,13 @@ bool ItchParser::next(Message& out) {
       pos_ += 8;
       Qty qty = read_be<Qty>(base + pos_);
       pos_ += 4;
+      // Validate: side must be 0 (Buy) or 1 (Sell); qty must be non-zero.
+      if (static_cast<std::uint8_t>(side) > 1 || qty == 0) { ok = false; break; }
       out = OrderAddMsg{ts, oid, sym, side, price, qty};
       break;
     }
     case 'E': {
-      if (pos_ + 12 > size_) return false;
+      if (pos_ + 12 > size_) { ok = false; break; }
       OrderID oid = read_be<OrderID>(base + pos_);
       pos_ += 8;
       Qty qty = read_be<Qty>(base + pos_);
@@ -146,7 +152,7 @@ bool ItchParser::next(Message& out) {
       break;
     }
     case 'C': {
-      if (pos_ + 12 > size_) return false;
+      if (pos_ + 12 > size_) { ok = false; break; }
       OrderID oid = read_be<OrderID>(base + pos_);
       pos_ += 8;
       Qty qty = read_be<Qty>(base + pos_);
@@ -155,14 +161,35 @@ bool ItchParser::next(Message& out) {
       break;
     }
     case 'D': {
-      if (pos_ + 8 > size_) return false;
+      if (pos_ + 8 > size_) { ok = false; break; }
       OrderID oid = read_be<OrderID>(base + pos_);
       pos_ += 8;
       out = OrderDeleteMsg{ts, oid};
       break;
     }
+    case 'L': {
+      // L2 aggregate: symbol:2, side:1, price:8, qty:4, order_count:4 = 19 bytes
+      if (pos_ + 19 > size_) { ok = false; break; }
+      SymbolID sym = read_be<SymbolID>(base + pos_);
+      pos_ += 2;
+      Side side = static_cast<Side>(base[pos_]);
+      ++pos_;
+      Price price = read_be<Price>(base + pos_);
+      pos_ += 8;
+      Qty qty = read_be<Qty>(base + pos_);
+      pos_ += 4;
+      std::uint32_t order_count = read_be<std::uint32_t>(base + pos_);
+      pos_ += 4;
+      out = L2AggregateMsg{ts, sym, side, price, qty, order_count};
+      break;
+    }
     default:
-      return false;
+      ok = false;
+      break;
+  }
+  if (!ok) {
+    ++errors_;
+    return false;
   }
   ++count_;
   return true;

@@ -111,7 +111,7 @@ void Analytics::mark_to_market(SymbolID sym, double mid_price) {
     double mid_move = (it->side == Side::Buy)
                           ? (mid_price - it->fill_price)
                           : (it->fill_price - mid_price);
-    if (mid_move < -s.tick_size) {
+    if (mid_move < -config_.tick_size) {
       // Mid moved against us: toxic fill.
       double cost = std::abs(mid_move) * static_cast<double>(std::abs(it->qty));
       toxic_cost_ += cost;
@@ -136,7 +136,7 @@ void Analytics::classify_pending(Timestamp now) {
   // Drop fills whose lookback window has expired without a mid update —
   // they can't be classified, so we treat them as non-toxic.
   while (!pending_fills_.empty() &&
-         (now - pending_fills_.front().fill_ts) > kToxicLookbackNs) {
+         (now - pending_fills_.front().fill_ts) > config_.toxic_lookback_ns) {
     pending_fills_.pop_front();
   }
 }

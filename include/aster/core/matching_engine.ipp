@@ -87,6 +87,9 @@ bool MatchingEngine<Callback>::add_order(OrderID id, SymbolID sym, Side side,
                                          Price price, Qty qty,
                                          Timestamp ts) noexcept {
   if (qty == 0 || sym >= books_.size()) return false;
+  // A limit order with an invalid price would rest at UINT64_MAX and
+  // immediately match all bids (or 0 and match all asks). Reject it.
+  if (price == kPriceInvalid) return false;
   Order* o = pool_.acquire();
   if (!o) return false;
   o->order_id = id;
@@ -149,6 +152,61 @@ bool MatchingEngine<Callback>::add_order(OrderID id, SymbolID sym, Side side,
 }
 
 template <typename Callback>
+bool MatchingEngine<Callback>::add_market_order(OrderID id, SymbolID sym,
+                                                Side side, Qty qty,
+                                                Timestamp ts) noexcept {
+  if (qty == 0 || sym >= books_.size()) return false;
+  Order* o = pool_.acquire();
+  if (!o) return false;
+  o->order_id = id;
+  o->symbol = sym;
+  o->side = side;
+  o->price = kPriceInvalid;  // market orders have no limit price
+  o->qty_remaining = qty;
+  o->qty_original = qty;
+  o->submit_ts = ts;
+  o->in_book = false;
+  o->next = o->prev = nullptr;
+
+  OrderBook& book = books_[sym];
+  Qty remaining = qty;
+
+  // Sweep the opposite side: match against every resting price, best first,
+  // until either the aggressor is filled or the opposite side is exhausted.
+  // No price constraint — a market order takes whatever is available.
+  if (side == Side::Buy) {
+    while (remaining > 0 && book.has_ask()) {
+      LevelQueue* lvl = book.levels.find(book.ask_min);
+      if (!lvl) break;
+      remaining = match_against_level(*lvl, o, sym, ts);
+      if (lvl->empty()) {
+        book.erase_price(book.ask_min, Side::Sell);
+        book.levels.erase(book.ask_min);
+        book.refresh_top();
+      }
+    }
+  } else {
+    while (remaining > 0 && book.has_bid()) {
+      LevelQueue* lvl = book.levels.find(book.best_bid);
+      if (!lvl) break;
+      remaining = match_against_level(*lvl, o, sym, ts);
+      if (lvl->empty()) {
+        book.erase_price(book.best_bid, Side::Buy);
+        book.levels.erase(book.best_bid);
+        book.refresh_top();
+      }
+    }
+  }
+
+  // IOC: release the aggressor back to the pool in all cases. Market orders
+  // never rest on the book. match_against_level only releases the resting
+  // (maker) order on full fill, never the aggressor — so this single release
+  // is safe regardless of whether `remaining` reached zero or not.
+  pool_.release(o);
+  return true;
+}
+
+template <typename Callback>
 Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty,
                                                  Timestamp ts) noexcept {
   if (qty == 0) return 0;
@@ -165,7 +223,12 @@ Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty,
   if (lvl) {
     lvl->adjust_total_qty(fill_qty);
     if (o->qty_remaining == 0) {
-      lvl->pop_head();
+      // The resting order must be at its level. Use remove() instead of
+      // pop_head() so that a mid-queue order (e.g. after a partial fill
+      // in a prior execute_order) is removed correctly rather than
+      // accidentally popping the wrong order from the head.
+      assert(lvl->head() == o && "execute_order_impl: resting order must be at head on full fill");
+      lvl->remove(o);
       order_index_.erase(o->order_id);
       pool_.release(o);
       if (lvl->empty()) {
@@ -205,6 +268,33 @@ bool MatchingEngine<Callback>::cancel_order(OrderID id) noexcept {
   order_index_.erase(id);
   pool_.release(o);
   return true;
+}
+
+template <typename Callback>
+Qty MatchingEngine<Callback>::reduce_order(OrderID id, Qty qty_to_reduce) noexcept {
+  if (qty_to_reduce == 0) return 0;
+  auto* p = order_index_.find(id);
+  if (!p) return 0;
+  Order* o = p->second;
+
+  // If reducing by more than or equal to remaining, fully cancel.
+  if (qty_to_reduce >= o->qty_remaining) {
+    Qty removed = o->qty_remaining;
+    (void)cancel_order(id);
+    return removed;
+  }
+
+  // Partial reduction: adjust the quantity in place. The order stays in
+  // its queue position (no priority change) — matching real exchange
+  // semantics for ITCH 'C' partial cancels.
+  Qty delta = qty_to_reduce;
+  o->qty_remaining -= delta;
+  OrderBook& book = books_[o->symbol];
+  auto* lvl = book.levels.find(o->price);
+  if (lvl) {
+    lvl->adjust_total_qty(delta);
+  }
+  return delta;
 }
 
 template <typename Callback>

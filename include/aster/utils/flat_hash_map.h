@@ -116,6 +116,8 @@ class flat_hash_map {
     std::vector<V, VAlloc> old_vals(new_capacity);
     std::vector<SlotState> old_meta(new_capacity, SlotState::Empty);
 
+    // After swap: keys_/vals_/meta_ are the new empty vectors;
+    // old_keys/old_vals/old_meta hold the original data to re-insert.
     std::swap(keys_, old_keys);
     std::swap(vals_, old_vals);
     std::swap(meta_, old_meta);
@@ -124,6 +126,10 @@ class flat_hash_map {
 
     for (size_type i = 0, n = old_meta.size(); i < n; ++i) {
       if (old_meta[i] == SlotState::Occupied) {
+        // std::move from the original data (now in old_keys/old_vals after
+        // swap). The moved-from elements are left in a valid state for the
+        // vector destructor — safe for POD and for types with proper
+        // move-assignment.
         insert_unchecked(std::move(old_keys[i]), std::move(old_vals[i]));
       }
     }
