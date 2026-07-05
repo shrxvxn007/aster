@@ -78,6 +78,42 @@ target_link_options(aster_sim PRIVATE
 )
 
 # -----------------------------------------------------------------------------
+# Synthetic-benchmark throughput-floor target.
+#
+# Wraps a Release-mode `aster_sim --events N` invocation through
+# scripts/perf_floor_check.py, which parses the `Throughput: <float> M
+# events/sec` line and asserts the measured rate is >= PERF_FLOOR_M_EV_PER_SEC.
+# Mirrors the inline awk block in .github/workflows/ci.yml::perf-floor so
+# the floor logic lives in exactly one place and local `cmake --build
+# build --target perf-floor` produces the same gate decision as the CI job.
+#
+# Configure-time overrides:
+#   -DPERF_FLOOR_M_EV_PER_SEC=12.0   raise the floor
+#   -DPERF_FLOOR_EVENTS=2000000      raise the event count
+# Build-time override (per-invocation):
+#   cmake --build build --target perf-floor -DPERF_FLOOR_EVENTS=500000
+# -----------------------------------------------------------------------------
+if(NOT DEFINED PERF_FLOOR_M_EV_PER_SEC)
+  set(PERF_FLOOR_M_EV_PER_SEC 10.0 CACHE FLOAT
+      "Throughput floor for `perf-floor` target + CI perf-floor job (M events/sec)")
+endif()
+if(NOT DEFINED PERF_FLOOR_EVENTS)
+  set(PERF_FLOOR_EVENTS 1000000 CACHE INTEGER
+      "Event count for `perf-floor` target + CI perf-floor job")
+endif()
+
+add_custom_target(perf-floor
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/perf_floor_check.py"
+          --binary "$<TARGET_FILE:aster_sim>"
+          --events "${PERF_FLOOR_EVENTS}"
+          --floor "${PERF_FLOOR_M_EV_PER_SEC}"
+  DEPENDS aster_sim
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  COMMENT "Running synthetic-benchmark throughput-floor check (floor=${PERF_FLOOR_M_EV_PER_SEC} M events/sec, events=${PERF_FLOOR_EVENTS})"
+  VERBATIM
+)
+
+# -----------------------------------------------------------------------------
 # Tests
 # -----------------------------------------------------------------------------
 enable_testing()
