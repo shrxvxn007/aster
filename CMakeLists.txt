@@ -147,3 +147,16 @@ target_link_options(test_replay PRIVATE
   $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 add_test(NAME test_replay COMMAND test_replay)
+
+# -----------------------------------------------------------------------------
+# Python regression tests
+# -----------------------------------------------------------------------------
+# CLI flag-parser regression gate. Asserts every --flag passed to
+# aster_replay/aster_sim in any .sh/.py/.yml callsite is registered in
+# the relevant binary's std::strcmp parser. Stdlib Python 3 only; no
+# pytest dependency. Wired into the CI build job's ctest matrix so flag
+# drift fails at PR time with a file:line reference, not silently at the
+# next CI run of an offline workflow.
+add_test(NAME test_cli_flag_parser
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli_flag_parser.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
