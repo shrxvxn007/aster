@@ -1,11 +1,15 @@
 # Aster CI: build + test on Ubuntu and macOS in Release. Runs a loose
-# Release throughput floor check on Linux, a clang-tidy gate on Linux
-# Release, and uses ccache to keep rebuilds under a minute. Sanitizer
-# coverage (ASan + UBSan) is available locally via `Debug` build but is
-# intentionally NOT exercised in CI \u2014 instrumented -O0 binaries are
-# prohibitively slow under ctest on macOS runners.\n
+# Release throughput floor check + a strategy-layer regression gate on
+# Linux, a clang-tidy gate on Linux Release, and uses ccache to keep
+# rebuilds under a minute. Sanitizer coverage (UBSan) is exercised in
+# CI on Ubuntu+Debug; macOS+Debug is intentionally NOT exercised
+# because Apple Clang UBSan runtime overhead remains too high for the
+# GHA runner. The capture-ci job below refreshes the offline mirror
+# under ci/ on a 6-hour cron and via workflow_dispatch.
 
-name: CIon:
+name: CI
+
+on:
   push:
     branches: [main]
   pull_request:
@@ -22,9 +26,6 @@ name: CIon:
         required: false
         default: '3'
 
-
-
-
 permissions:
   contents: read
 
@@ -33,6 +34,9 @@ jobs:
   # Main build + test matrix.
   # --------------------------------------------------------------------------
   build:
+    # Only on push + PR; schedule and workflow_dispatch are routed to the
+    # capture-ci job instead.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     # CI runs Release across both OSes (production-proxy) and Debug on
     # Ubuntu only so UBSan coverage is exercised in CI. macOS + Debug is
     # dropped from the matrix because (a) Apple Clang UBSan runtime
@@ -50,7 +54,6 @@ jobs:
           - os: ubuntu-latest
             build_type: Debug
 
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -200,20 +203,24 @@ jobs:
           done
           clang-tidy --quiet -p build "${files[@]}"
 
-  # ----------------------------------------------------------------------
+  # --------------------------------------------------------------------------
   # Offline CI mirror refresh. Triggered by cron every 6 hours (skewed
   # 13 minutes past the hour to dodge GitHub's top-of-hour Action queue
   # congestion) or by workflow_dispatch for an immediate refresh. The
   # job rebuilds only aster_sim so perf_floor_local.txt is a real captured
   # measurement rather than a placeholder. We don't include any of the
   # build / perf-floor / lint work here because each existing job is
-  # gated to push / pull_request events via `if:` filters below.
-  # ----------------------------------------------------------------------
+  # gated to push / pull_request events via `if:` filters above.
+  # --------------------------------------------------------------------------
   capture-ci:
     runs-on: ubuntu-latest
+    # contents:write commits + pushes regenerated ci/ artifacts.
+    # actions:read is required because the top-level `permissions: contents:
+    # read` revoked all defaults, and gh run list / view need actions:read.
+    # Without both, capture_ci.sh exits 1 on its auth-status pre-flight.
     permissions:
-      contents: write  # commit + push regenerated ci/ artifacts
-      actions: read    # gh run list / gh run view API scopes
+      contents: write
+      actions: read
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     concurrency:
       group: capture-ci-${{ github.ref }}
