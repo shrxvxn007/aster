@@ -80,12 +80,15 @@ class MatchingEngine {
   // Historical execution: removes `qty` from the resting order `id`. If the
   // fill completes the order, the order is removed from the book and pool.
   // Returns the unfilled remainder (0 when `qty` was fully absorbed into the
-  // resting order; 0 also when the order is not in the book). The function's
-  // historical claim of "returns the qty actually filled" was wrong -- the
-  // test fixture (tests/test_engine.cpp:test_execute_order_historical_fill)
-  // has always keyed on `Qty unfilled = engine.execute_order(...); assert(unfilled == 0)`
-  // and the implementation in matching_engine.ipp has long matched that
-  // contract (`return qty - fill_qty`). The header was the laggard.
+  // resting order; 0 also when the order is not in the book). Mirrors the
+  // contract the test fixture always assumed:
+  // `tests/test_engine.cpp::test_execute_order_historical_fill` binds the
+  // result to `Qty unfilled` and asserts `unfilled == 0`. Prior to this
+  // fix, BOTH this header docstring ("returns the qty actually filled") AND
+  // the implementation in matching_engine.ipp (`return fill_qty;`) were
+  // misaligned with the test -- both have been corrected so the test, the
+  // API, and the ITCH-'E' ingestion semantics all share the natural
+  // `unfilled == 0` shape.
   [[nodiscard]] Qty execute_order(OrderID id, Qty qty, Timestamp ts) noexcept;
 
   Price best_bid(SymbolID s) const {

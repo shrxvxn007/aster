@@ -230,6 +230,8 @@ void test_market_order_sweep_and_ioc() {
   // 100 stays). Residual 0 — IOC fully filled.
   bool ok = engine.add_market_order(10, 0, Side::Buy, 7, 4);
   assert(ok);
+  // 2 trades -> 2 fills under the 1-on_fill-per-trade contract
+  // (see matching_engine.ipp::match_against_level).
   assert(cb.fill_count == 2);
   assert(cb.fills[0].price == 99ULL && cb.fills[0].qty == 3);
   assert(cb.fills[1].price == 100ULL && cb.fills[1].qty == 4);
@@ -241,10 +243,12 @@ void test_market_order_sweep_and_ioc() {
   assert(engine.best_ask(0) == 100ULL);
 
   // Second market order with insufficient depth: IOC cancels residually.
+  // cb.fill_count is only ever incremented; reset it here or the second
+  // IOC's 2 fills fold onto the first IOC's 2.
   cb.fills.clear();
+  cb.fill_count = 0;
   ok = engine.add_market_order(11, 0, Side::Buy, 1000, 5);
   assert(ok);
-  // 1 share left at 100 + 4 at 101 = 5 fills. Order 11 doesn't rest.
   assert(cb.fill_count == 2);
   assert(cb.fills[0].qty == 1 && cb.fills[0].price == 100ULL);
   assert(cb.fills[1].qty == 4 && cb.fills[1].price == 101ULL);
@@ -270,10 +274,12 @@ void test_multi_symbol_independence() {
   assert(engine.add_order(1000, /*sym=*/1, Side::Buy,  99ULL, 7, 1000));
   assert(engine.add_order(1001, /*sym=*/1, Side::Sell, 99ULL, 3, 1001));
   // Multi-symbol interaction check: symbol 1 crosses, symbol 0 unaffected.
+  // 1 fill under the 1-on_fill-per-trade contract
+  // (see matching_engine.ipp::match_against_level).
   assert(cb.fill_count == 1);
   assert(cb.fills[0].symbol == 1);
-  assert(engine.best_bid(0) == 1'000'000ULL);   // still top of book on sym 0
-  assert(engine.level_qty(0, 1'000'099ULL) == 0);  // unused level
+  assert(engine.best_bid(0) == 1'000'099ULL);   // top of sym0 = highest inserted
+  assert(engine.level_qty(0, 2'000'000ULL) == 0);  // outside the inserted range
 
   assert(engine.find_order(1000) != nullptr);
   assert(engine.find_order(1000)->qty_remaining == 4);  // 7 - 3
