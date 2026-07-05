@@ -69,7 +69,10 @@ jobs:
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure --timeout 60
+        # --timeout 120: per-test wallclock cap. 60s was flagged as borderline-
+        # aggressive for any future contributor adding a slower test. 120s
+        # gives ~2x headroom and still catches hangs.
+        run: ctest --output-on-failure --timeout 120
 
       - name: ccache stats
         if: matrix.os == 'ubuntu-latest' && matrix.build_type == 'Release'
