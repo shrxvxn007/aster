@@ -5,13 +5,25 @@
 # intentionally NOT exercised in CI \u2014 instrumented -O0 binaries are
 # prohibitively slow under ctest on macOS runners.\n
 
-name: CI
-
-on:
+name: CIon:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  # Refresh offline CI artifacts every 6 hours, skewed 13 minutes past
+  # the hour to dodge GitHub's top-of-hour Action queue congestion.
+  schedule:
+    - cron: '13 */6 * * *'
+  # Manual trigger for an immediate refresh between scheduled runs.
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Number of recent runs to capture into ci/'
+        required: false
+        default: '3'
+
+
+
 
 permissions:
   contents: read
@@ -38,6 +50,7 @@ jobs:
           - os: ubuntu-latest
             build_type: Debug
 
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -90,6 +103,7 @@ jobs:
   # flakiness from shared macOS runners.
   # --------------------------------------------------------------------------
   perf-floor:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -150,6 +164,7 @@ jobs:
   # reasonable; macOS clang-tidy is also fine but skipped to keep CI fast.
   # --------------------------------------------------------------------------
   lint:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -184,3 +199,58 @@ jobs:
             [ -f "$t" ] && files+=("$t")
           done
           clang-tidy --quiet -p build "${files[@]}"
+
+  # ----------------------------------------------------------------------
+  # Offline CI mirror refresh. Triggered by cron every 6 hours (skewed
+  # 13 minutes past the hour to dodge GitHub's top-of-hour Action queue
+  # congestion) or by workflow_dispatch for an immediate refresh. The
+  # job rebuilds only aster_sim so perf_floor_local.txt is a real captured
+  # measurement rather than a placeholder. We don't include any of the
+  # build / perf-floor / lint work here because each existing job is
+  # gated to push / pull_request events via `if:` filters below.
+  # ----------------------------------------------------------------------
+  capture-ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # commit + push regenerated ci/ artifacts
+      actions: read    # gh run list / gh run view API scopes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: capture-ci-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gh CLI + jq
+        run: sudo apt-get update && sudo apt-get install -y gh jq
+
+      - name: Build aster_sim (for perf_floor_local.txt)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target aster_sim --parallel
+
+      - name: Refresh ci/ artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `inputs.runs` is only valid on workflow_dispatch; for the cron
+          # path we fall back to the default of 3 to keep the offline
+          # snapshot small.
+          CAPTURE_RUNS: ${{ github.event_name == 'workflow_dispatch' && inputs.runs || '3' }}
+        run: |
+          echo "$GH_TOKEN" | gh auth login --with-token
+          ./scripts/capture_ci.sh --runs "$CAPTURE_RUNS"
+
+      - name: Commit + push regenerated ci/
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git add ci/
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: refresh offline artifacts $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            # Pull --rebase first to defuse parallel-developer-push races
+            # (cron job started a few seconds before a developer pushed).
+            git pull --rebase origin "${{ github.ref }}" 2>/dev/null || true
+            git push
+          else
+            echo "no ci/ changes since last refresh"
+          fi
