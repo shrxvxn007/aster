@@ -53,9 +53,18 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! gh auth status >/dev/null 2>&1; then
-  echo "ERROR: gh is not authenticated. Run 'gh auth login' first." >&2
-  exit 1
+# Auth: GH_TOKEN env var takes precedence over gh auth status. GHA workflows
+# pass the workflow token via $GH_TOKEN and don't need a separate `gh auth
+# login`; local runs use the maintainer's `gh auth login` (no GH_TOKEN set)
+# and the auth-status check below falls through.
+if [ -z "${GH_TOKEN:-}" ]; then
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "ERROR: neither GH_TOKEN nor gh auth status is set. Run 'gh auth login' or set GH_TOKEN." >&2
+    exit 1
+  fi
+else
+  export GH_TOKEN
+  export GH_HOST="${GH_HOST:-github.com}"
 fi
 
 if ! gh repo view "$REPO" >/dev/null 2>&1; then

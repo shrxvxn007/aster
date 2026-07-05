@@ -239,25 +239,57 @@ jobs:
       - name: Refresh ci/ artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_HOST: github.com
           # `inputs.runs` is only valid on workflow_dispatch; for the cron
           # path we fall back to the default of 3 to keep the offline
           # snapshot small.
           CAPTURE_RUNS: ${{ github.event_name == 'workflow_dispatch' && inputs.runs || '3' }}
-        run: |
-          echo "$GH_TOKEN" | gh auth login --with-token
-          ./scripts/capture_ci.sh --runs "$CAPTURE_RUNS"
+        # capture_ci.sh honours GH_TOKEN env directly, so no `gh auth login`
+        # sub-step needed. Pevious attempts at `echo $GH_TOKEN | gh auth
+        # login --with-token` failed inside the GHA environment because
+        # the workflow's GITHUB_TOKEN doesn't survive `gh auth login` re-auth.
+        run: ./scripts/capture_ci.sh --runs "$CAPTURE_RUNS"
 
-      - name: Commit + push regenerated ci/
+      # Skip the commit when the regenerated snapshot is structurally
+      # identical to the one already on main. Prevents timestamp-only
+      # commits every 6 hours when nothing meaningful has changed.
+      - name: Check + commit + push regenerated ci/
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name  "github-actions[bot]"
           git add ci/
-          if ! git diff --cached --quiet; then
-            git commit -m "ci: refresh offline artifacts $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            # Pull --rebase first to defuse parallel-developer-push races
-            # (cron job started a few seconds before a developer pushed).
-            git pull --rebase origin "${{ github.ref }}" 2>/dev/null || true
-            git push
-          else
-            echo "no ci/ changes since last refresh"
+
+          new_sig=$(python3 - <<'PYEOF'
+import hashlib, json, re
+def sig():
+  out = []
+  try:
+    m = re.search(r"<title>([^<]+)</title>", open("ci/badge.svg").read())
+    if m: out.append(("badge", m.group(1).strip()))
+  except OSError: pass
+  try:
+    for r in json.load(open("ci/runs.json")):
+      out.append(("run", r.get("databaseId"), r.get("conclusion")))
+  except (OSError, ValueError): pass
+  try:
+    for j in json.load(open("ci/last_run_jobs.json")):
+      out.append(("job", j.get("name"), j.get("conclusion")))
+  except (OSError, ValueError): pass
+  return hashlib.sha256(repr(sorted(out)).encode()).hexdigest()[:16]
+print(sig())
+PYEOF
+          )
+          old_sig=$(git show HEAD:ci/_fingerprint.txt 2>/dev/null | head -1 || true)
+
+          if [ "$new_sig" = "$old_sig" ] && [ -n "$old_sig" ]; then
+            echo "no structural change vs HEAD (fingerprint=$new_sig); skipping commit"
+            exit 0
           fi
+
+          echo "$new_sig" > ci/_fingerprint.txt
+          git add ci/_fingerprint.txt
+          git commit -m "ci: refresh offline artifacts (fingerprint=$new_sig)"
+          # Pull --rebase first to defuse parallel-developer-push races
+          # (cron job started a few seconds before a developer pushed).
+          git pull --rebase origin "${{ github.ref }}" 2>/dev/null || true
+          git push
