@@ -87,6 +87,39 @@ Generates a deterministic Poisson order-arrival process (`splitmix64` PRNG),
 sends `N` events round-robin across `S` symbols through the engine, and
 prints throughput (events / second) plus a nanosecond-latency profile.
 
+#### Latency-injection sweep (`--sweep`)
+
+```sh
+./build/aster_sim --events 1000000 --sweep
+```
+
+Runs the same engine at four per-event latency levels (0 / 100 / 1k / 10k
+ns) and prints a compact comparison table. The bench overlays a busy-wait
+on top of each event so the per-engine measure isolates the matching-engine
+hot-path from the simulated network delay. Wall-clock throughput collapses
+toward `1 / injected_latency`; the engine-only p50 / p99 / p99.99 columns
+should stay flat, revealing whether the engine itself scales under load.
+The table also reports `alloc_B` (heap bytes allocated inside the per-event
+loop, via a global operator new / delete override) and resident-set size.
+
+Snapshot of an Apple-silicon Release run (1M events, 16 symbols, seed 42):
+
+```
+=== Latency Sweep (events=1000000, symbols=16, seed=42) ===
+exch_ns    elapsed_ms   thru(M/s)    p50(ns)  p99(ns)  p99.9   p99.99  max(ns)  alloc_B  rss_KB
+---------- ------------ ------------ -------- -------- ------- ------- ------- -------- -------
+0          48.717       20.53        32       128      128     1024    12042    327168   20752
+100        190.152      5.26         32       128      128     256     7875     327168   20816
+1000       1067.700     0.94         32       128      256     256     7792     327168   20848
+10000      10088.481    0.10         32       256      512     2048    13583    327168   20864
+```
+
+The `alloc_B` column is the diagnostic the sweep exists for: every row
+above shows 327 KB attributed to `flat_hash_map` rehashes inside
+`OrderBook::levels_` during the loop — a real allocation that the
+matching engine is supposed to be free of on the hot path. Pre-reserving
+the per-symbol price-level map eliminates it.
+
 This is the binary the GitHub Actions perf floor uses
 (`throughput >= 10 M events/s` on Linux Release, see
 `.github/workflows/ci.yml`).
