@@ -1,0 +1,3 @@
+# Binary file attributes
+# ITCH protocol files: raw big-endian struct bytes — must not be diffed as text.
+*.itch binary

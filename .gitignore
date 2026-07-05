@@ -34,8 +34,11 @@ massif.out.*
 *.tmp
 *.bak
 
-# Optional local data — large ITCH files should not live in the repo
+# Optional local data — large / private ITCH files should not live in the
+# repo, but a tiny deterministic sample under samples/ is committed so the
+# `aster_replay --itch-file samples/test.itch` command works out of the box.
 *.itch
+!samples/*.itch
 *.pcap
 data/
 

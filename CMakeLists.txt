@@ -38,7 +38,8 @@ target_include_directories(aster_obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(aster_obj PUBLIC cxx_std_20)
 
 # Release: -O3, LTO, arch-tuned, NDEBUG.
-# Debug  : -O0, ASan + UBSan, frame pointers for stack traces.
+# Debug  : -O0, ASan + UBSan (local-only; CI runs Release only because the
+# instrumented -O0 binary is 30-50x slower and times out ctest on macOS).
 target_compile_options(aster_obj PRIVATE
   $<$<CONFIG:Release>:-O3 ${ARCH_FLAG} -flto -DNDEBUG>
   $<$<CONFIG:Debug>:-O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer>
