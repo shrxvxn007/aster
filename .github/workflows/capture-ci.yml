@@ -1,0 +1,97 @@
+# Aster offline artifact mirror refresh. Runs every 6 hours on a cron
+# skewed past the top of the hour to dodge GitHub's actions queue
+# congestion, or via workflow_dispatch for an immediate manual refresh
+# between scheduled runs. Builds aster_sim locally so perf_floor_local.txt
+# is a real measurement rather than a placeholder. Commits the
+# regenerated ci/ back to main only when the structural fingerprint
+# (badge title + run conclusions + job conclusions) changes vs HEAD --
+# prevents timestamp-only commit pollution.
+
+name: Capture CI
+
+on:
+  schedule:
+    - cron: '13 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Number of recent runs to capture into ci/'
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  capture-ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: capture-ci-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gh CLI + jq
+        run: sudo apt-get update && sudo apt-get install -y gh jq
+
+      - name: Build aster_sim (for perf_floor_local.txt)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target aster_sim --parallel
+
+      - name: Refresh ci/ artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_HOST: github.com
+          # `inputs.runs` is only valid on workflow_dispatch; for the cron
+          # path we fall back to the default of 3 to keep the offline
+          # snapshot small.
+          CAPTURE_RUNS: ${{ github.event_name == 'workflow_dispatch' && inputs.runs || '3' }}
+        # capture_ci.sh honours GH_TOKEN env directly, so no `gh auth login`
+        # sub-step is needed.
+        run: ./scripts/capture_ci.sh --runs "$CAPTURE_RUNS"
+
+      - name: Check + commit + push regenerated ci/
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git add ci/
+
+          new_sig=$(python3 - <<'PYEOF'
+import hashlib, json, re
+def sig():
+  out = []
+  try:
+    m = re.search(r"<title>([^<]+)</title>", open("ci/badge.svg").read())
+    if m: out.append(("badge", m.group(1).strip()))
+  except OSError: pass
+  try:
+    for r in json.load(open("ci/runs.json")):
+      out.append(("run", r.get("databaseId"), r.get("conclusion")))
+  except (OSError, ValueError): pass
+  try:
+    for j in json.load(open("ci/last_run_jobs.json")):
+      out.append(("job", j.get("name"), j.get("conclusion")))
+  except (OSError, ValueError): pass
+  return hashlib.sha256(repr(sorted(out)).encode()).hexdigest()[:16]
+print(sig())
+PYEOF
+          )
+          old_sig=$(git show HEAD:ci/_fingerprint.txt 2>/dev/null | head -1 || true)
+
+          if [ "$new_sig" = "$old_sig" ] && [ -n "$old_sig" ]; then
+            echo "no structural change vs HEAD (fingerprint=$new_sig); skipping commit"
+            exit 0
+          fi
+
+          echo "$new_sig" > ci/_fingerprint.txt
+          git add ci/_fingerprint.txt
+          git commit -m "ci: refresh offline artifacts (fingerprint=$new_sig)"
+          # Pull --rebase first to defuse parallel-developer-push races
+          # (cron job started a few seconds before a developer pushed).
+          git pull --rebase origin "${{ github.ref }}" 2>/dev/null || true
+          git push
