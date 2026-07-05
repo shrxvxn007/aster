@@ -120,6 +120,21 @@ jobs:
           fi
           echo "Throughput floor check passed: $throughput M events/s >= $floor M events/s"
 
+      # ------------------------------------------------------------------
+      # Strategy-layer regression gate: replay a deterministic ITCH stream
+      # produced by scripts/generate_test_itch.py and assert the Analytics
+      # block matches tests/golden/analytics_ci.json within per-field
+      # tolerances. Stdlib-only Python; no extra deps to install.
+      # ------------------------------------------------------------------
+      - name: Strategy regression gate
+        run: |
+          set -e
+          python3 scripts/generate_test_itch.py --out /tmp/ci.itch --seconds 5
+          ./build/aster_replay --itch-file /tmp/ci.itch --speed batch > /tmp/ci.out 2>&1 || true
+          echo '--- replay output (last 20 lines) ---'
+          tail -20 /tmp/ci.out
+          python3 scripts/check_replay_golden.py tests/golden/analytics_ci.json /tmp/ci.out
+
   # --------------------------------------------------------------------------
   # clang-tidy static-analysis gate. Only Linux Release to keep runtimes
   # reasonable; macOS clang-tidy is also fine but skipped to keep CI fast.
