@@ -28,9 +28,15 @@ struct AgentOrder {
 
 class QueueTracker {
  public:
-  // Register a new agent order.
+  // Register a new agent order. Price MUST fit in 48 bits for level_key()
+  // to disambiguate (sym, price) — above 2^48 the SymbolID nibble is
+  // corrupted silently. We assert explicitly so the failure mode is a
+  // clean abort at registration rather than a confused tracker later.
   void on_agent_order(OrderID id, SymbolID sym, Price price, Qty qty,
                       Qty volume_ahead) {
+    assert(price < (Price(1) << 48) &&
+           "QueueTracker: price exceeds 48-bit packing bound (≈ $281T at "
+           "1e5 scale). level_key() would clobber the SymbolID nibble.");
     agents_[id] = {sym, price, volume_ahead, qty};
     level_index_[level_key(sym, price)].push_back(id);
   }
@@ -79,8 +85,10 @@ class QueueTracker {
 
  private:
   // Combine (SymbolID, Price) into a single 64-bit key for the index.
-  // Price lives in the high 48 bits, SymbolID in the low 16. Assumes
-  // Price fits in 48 bits (fixed-point 1e5 scale → max ≈ 3.6e14 < 2^48).
+  // Price lives in the high 48 bits; SymbolID in the low 16. ASSUMES Price
+  // fits in 48 bits (fixed-point 1e5 scale → max ≈ 2.8e14 < 2^48).
+  // on_agent_order() asserts this; this is the only entry point that adds
+  // to level_index_, so an assertion there is sufficient coverage.
   static std::uint64_t level_key(SymbolID sym, Price price) noexcept {
     return (static_cast<std::uint64_t>(price) << 16) |
            static_cast<std::uint64_t>(sym);

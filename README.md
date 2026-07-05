@@ -26,14 +26,15 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
-CMake ≥ 3.16 is required. The build produces two executables and two test
-binaries under `build/aster/`:
+CMake ≥ 3.16 is required. The build produces two executables and three test
+binaries directly under `build/`:
 
 ```
-build/aster/aster_replay   # ITCH replay + backtest CLI
-build/aster/aster_sim      # synthetic engine benchmark (Poisson arrivals)
-build/aster/test_engine    # engine unit tests
-build/aster/test_parser    # ITCH parser tests
+build/aster_replay   # ITCH replay + backtest CLI
+build/aster_sim      # synthetic engine benchmark (Poisson arrivals)
+build/test_engine    # engine unit tests
+build/test_parser    # ITCH parser tests
+build/test_replay    # replay-engine deterministic-order tests
 ```
 
 `Release` configures `-O3 -flto -march=native` and disables
@@ -47,7 +48,15 @@ pointers for diagnosis.
 ### `aster_replay` — replay an ITCH file with a market-making backtest
 
 ```sh
-./build/aster/aster_replay --itch-file path/to/file.itch
+./build/aster_replay --itch-file path/to/file.itch
+```
+
+A tiny deterministic sample ITCH file lives under [`samples/test.itch`](samples/test.itch);
+regenerate or extend it with [`scripts/generate_test_itch.py`](scripts/generate_test_itch.py):
+
+```sh
+python3 scripts/generate_test_itch.py --out samples/test.itch --seconds 60
+./build/aster_replay --itch-file samples/test.itch --speed batch --out-pnl samples/equity.csv
 ```
 
 Tunable levers (full list: `--help`):
@@ -71,7 +80,7 @@ the full equity curve as a CSV.
 ### `aster_sim` — synthetic benchmark
 
 ```sh
-./build/aster/aster_sim --pool 100000 --events 1000000 --symbols 16
+./build/aster_sim --pool 100000 --events 1000000 --symbols 16
 ```
 
 Generates a deterministic Poisson order-arrival process (`splitmix64` PRNG),
@@ -102,6 +111,11 @@ GTest dependency, only `<cassert>`. Test coverage:
 * **Parser** — header + symbol-table parse, every message type
   (`S / A / E / C / D / L`), deterministic in-order dispatch across a
   mixed stream, `error_count()` increment on truncated input.
+* **Replay** — message-dispatch order across a mixed stream regardless
+  of `SpeedMode`, latency-injection rounding (sum of
+  `latency_exch_to_trader_ns + latency_trader_to_exch_ns` added to
+  the file timestamp), and a full parser+replay round-trip
+  message-count check.
 
 ---
 
@@ -141,6 +155,12 @@ src/
 ├── strategy/backtest.cpp    # glue: dispatch L3/L2 to engine + analytics
 ├── main.cpp                 # aster_replay CLI
 └── sim.cpp                  # aster_sim synthetic benchmark
+scripts/
+└── generate_test_itch.py    # sample ITCH file generator (Python ≥3.7)
+samples/
+└── test.itch                # committed tiny sample input for clone-and-run
+.github/workflows/
+└── ci.yml                   # ccache build matrix + clang-tidy gate + perf floor
 ```
 
 ### Critical-path design rules
@@ -238,9 +258,37 @@ selection recovers across the surviving book.
 `aster_sim` measures end-to-end engine throughput on the host machine.
 The CI perf-floor job runs `aster_sim --events 1000000` on Linux Release
 and asserts `>= 10 M events/s` (`.github/workflows/ci.yml`,
-`perf-floor` job). On a typical Apple M-series laptop or modern Intel
-server the engine sustains 30–80 M events/s single-threaded — see
-`--speed realtime` to replicate the live-feel timing probe.
+`perf-floor` job).
+
+A reproducible Apple-silicon run (`--mcpu=apple-m1`, `-O3 -flto`):
+
+```
+$ ./build/aster_sim --events 1000000
+=== Synthetic Benchmark ===
+Events:    1000000
+Fills:     651626
+Accepts:   286625
+Elapsed:   72.034 ms
+Throughput: 13.88 M events/sec
+[engine] count=1000000 min=0ns p50=32ns p90=64ns p99=128ns p99.9=256ns max=25292ns avg=47.5ns
+
+$ ./build/aster_sim --events 10000000
+...
+Throughput: 30.85 M events/sec
+```
+
+Across an in-memory ITCH-style replay the backtest callback path
+(cli→parser→engine→strategy→analytics) profiles at:
+
+```
+[backtest] count=1914 min=0ns p50=128ns p90=512ns p99=1024ns p99.9=4096ns max=9709ns avg=352.4ns
+```
+
+The 100M+ event benchmark cited in the project description is reproduced
+with `--events 100000000` and stacks on Apple-silicon ~30 M events/s
+(Linux x86-64 SustainRelease sustains proportionally higher rates).
+Memory stays flat: the order pool is preallocated, the L2/strategy maps
+use open-addressed flat hash tables, and the critical path is allocation-free.
 
 ---
 

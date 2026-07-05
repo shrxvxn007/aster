@@ -31,7 +31,6 @@ massif.out.*
 *.swp
 *~
 *.swo
-.DS_Store
 *.tmp
 *.bak
 
@@ -40,7 +39,8 @@ massif.out.*
 *.pcap
 data/
 
-# macOS debug symbols
+# macOS
+.DS_Store
 *.dSYM/
 
 # CLion / IDE build directories

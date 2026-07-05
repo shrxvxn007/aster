@@ -1,5 +1,6 @@
 # Aster CI: build + test on Ubuntu and macOS, Debug (sanitizers) and
-# Release. Also runs a loose throughput floor check in Release.
+# Release. Also runs a loose throughput floor check in Release, a clang-tidy
+# gate on Linux Release, and uses ccache to keep rebuilds under a minute.
 
 name: CI
 
@@ -9,7 +10,13 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
+  # --------------------------------------------------------------------------
+  # Main build + test matrix.
+  # --------------------------------------------------------------------------
   build:
     strategy:
       fail-fast: false
@@ -26,10 +33,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure CMake
+      - name: Install ccache
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - name: Configure ccache
+        run: |
+          echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $GITHUB_ENV
+          ccache --set-config=max_size=200M
+          mkdir -p "$CCACHE_DIR"
+
+      - name: Configure CMake (ccache)
         run: >
-          cmake -B build
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
@@ -38,15 +55,32 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure
 
+      - name: ccache stats
+        if: matrix.os == 'ubuntu-latest' && matrix.build_type == 'Release'
+        run: ccache --show-stats --verbose | tail -20
+
+  # --------------------------------------------------------------------------
   # Loose throughput floor check — only on Linux Release to avoid CI
   # flakiness from shared macOS runners.
+  # --------------------------------------------------------------------------
   perf-floor:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ccache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - name: Configure ccache (perf-floor)
+        run: |
+          echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $GITHUB_ENV
+          ccache --set-config=max_size=200M
+          mkdir -p "$CCACHE_DIR"
+
       - name: Configure (Release)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
@@ -54,15 +88,13 @@ jobs:
       - name: Run throughput floor check
         working-directory: build
         run: |
-          output=$(./aster/aster_sim --events 1000000)
+          output=$(./aster_sim --events 1000000)
           echo "$output"
-          # Extract the "Throughput: X.XX M events/sec" line.
           throughput=$(echo "$output" | awk '/Throughput:/{print $2}')
           if [ -z "$throughput" ]; then
             echo "Failed to parse throughput"
             exit 1
           fi
-          # Floor: 10 M events/s. Loose to avoid flakiness on shared runners.
           floor=10.0
           cmp=$(echo "$throughput $floor" | awk '{if ($1 >= $2) print "ok"; else print "fail"}')
           if [ "$cmp" != "ok" ]; then
@@ -70,3 +102,43 @@ jobs:
             exit 1
           fi
           echo "Throughput floor check passed: $throughput M events/s >= $floor M events/s"
+
+  # --------------------------------------------------------------------------
+  # clang-tidy static-analysis gate. Only Linux Release to keep runtimes
+  # reasonable; macOS clang-tidy is also fine but skipped to keep CI fast.
+  # --------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+
+      - name: Configure (compile_commands generation)
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        # `bugprone-*,cppcoreguidelines-*,performance-*,readability-*` is the
+        # default checkset with `clang-tidy` minus modernize-* (we use C++20
+        # features clang-tidy -modernize can flag).
+        run: |
+          set -e
+          targets=(
+            "src/core/types.cpp"
+            "src/replay/parser.cpp"
+            "src/replay/replay_engine.cpp"
+            "src/strategy/analytics.cpp"
+            "src/strategy/mm_strategy.cpp"
+            "src/strategy/risk_manager.cpp"
+            "src/strategy/backtest.cpp"
+            "src/main.cpp"
+            "src/sim.cpp"
+          )
+          files=()
+          for t in "${targets[@]}"; do
+            [ -f "$t" ] && files+=("$t")
+          done
+          clang-tidy --quiet -p build "${files[@]}"

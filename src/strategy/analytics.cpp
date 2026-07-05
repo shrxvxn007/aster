@@ -146,7 +146,13 @@ double Analytics::sharpe_ratio() const noexcept {
   double mean = sum_returns_ / static_cast<double>(return_count_);
   double var = (sum_sq_returns_ / static_cast<double>(return_count_)) - mean * mean;
   if (var <= 0.0) return 0.0;
-  return mean / std::sqrt(var) * std::sqrt(252.0);
+  // Returns are per-fill (not regularly time-spaced). Annualising with
+  // sqrt(252) is the obvious but wrong fix — only do that when the caller
+  // has explicitly opted in via AnalyticsConfig::sharpe_annualize_periods
+  // (e.g. set to 252 for daily-binned returns, 252*24*60 for per-minute).
+  // Default is 1.0 ⇒ unannualised, a per-event figure of merit.
+  const double ann = std::max(1.0, config_.sharpe_annualize_periods);
+  return (mean / std::sqrt(var)) * std::sqrt(ann);
 }
 
 double Analytics::sortino_ratio() const noexcept {
@@ -155,7 +161,9 @@ double Analytics::sortino_ratio() const noexcept {
   double neg_var =
       sum_neg_sq_returns_ / static_cast<double>(return_count_);
   if (neg_var <= 0.0) return 0.0;
-  return mean / std::sqrt(neg_var) * std::sqrt(252.0);
+  // See sharpe_ratio() for the annualisation rationale.
+  const double ann = std::max(1.0, config_.sharpe_annualize_periods);
+  return (mean / std::sqrt(neg_var)) * std::sqrt(ann);
 }
 
 void Analytics::print(std::FILE* out) const {

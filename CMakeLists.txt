@@ -86,3 +86,13 @@ target_link_options(test_parser PRIVATE
   $<$<CONFIG:Debug>:-fsanitize=address,undefined>
 )
 add_test(NAME test_parser COMMAND test_parser)
+
+add_executable(test_replay tests/test_replay.cpp)
+target_link_libraries(test_replay PRIVATE aster_obj aster)
+target_compile_options(test_replay PRIVATE
+  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+)
+target_link_options(test_replay PRIVATE
+  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+)
+add_test(NAME test_replay COMMAND test_replay)

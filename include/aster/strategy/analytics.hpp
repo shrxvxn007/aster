@@ -28,6 +28,16 @@ struct AnalyticsConfig {
   double taker_fee_per_share = 0.0002;
   double tick_size = 0.0001;            // minimum price increment
   std::uint64_t toxic_lookback_ns = 100'000'000ULL;  // 100 ms
+
+  // Sharpe / Sortino annualisation. The engine accrues per-fill returns
+  // (event-driven, irregular time spacing); multiplying them by sqrt(252)
+  // is statistically meaningless. We keep the raw mean / stddev (= a
+  // per-event figure of merit) by default, and let the caller opt into an
+  // annualised Sharpe by setting this to the number of (regularly spaced)
+  // periods per year for whatever bin width they choose to compute
+  // separately. Daily: 252; per-minute: 252*24*60; per-second-in-RTH:
+  // 6.5*60*60 = 23400.
+  double sharpe_annualize_periods = 1.0;
 };
 
 class Analytics {
