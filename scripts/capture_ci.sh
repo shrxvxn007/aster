@@ -124,6 +124,13 @@ python3 -c 'import json; json.dump(json.load(open("'"$CI_DIR"'/last_run.raw.json
 rm "$CI_DIR/last_run.raw.json"
 
 # 5. last_run_jobs.json (per-job conclusions)
+if ! LAST_ID=$(python3 -c 'import json; runs=json.load(open("'"$CI_DIR"'/runs.json")); print(runs[0]["databaseId"])' 2>/dev/null); then
+  runs_len=$(python3 -c 'import json; print(len(json.load(open("'"$CI_DIR"'/runs.json"))))')
+  echo "no runs captured for $REPO/$BRANCH yet (runs.json has $runs_len entries); exiting 0"
+  exit 0
+fi
+
+# Existing LAST_ID computation block, kept verbatim.
 echo "==> capturing jobs in run $LAST_ID"
 if ! gh run view "$LAST_ID" --repo "$REPO" --json jobs \
       | python3 -c '

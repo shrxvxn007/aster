@@ -245,7 +245,7 @@ jobs:
           # snapshot small.
           CAPTURE_RUNS: ${{ github.event_name == 'workflow_dispatch' && inputs.runs || '3' }}
         # capture_ci.sh honours GH_TOKEN env directly, so no `gh auth login`
-        # sub-step needed. Pevious attempts at `echo $GH_TOKEN | gh auth
+        # sub-step needed. Previous attempts at `echo $GH_TOKEN | gh auth
         # login --with-token` failed inside the GHA environment because
         # the workflow's GITHUB_TOKEN doesn't survive `gh auth login` re-auth.
         run: ./scripts/capture_ci.sh --runs "$CAPTURE_RUNS"
