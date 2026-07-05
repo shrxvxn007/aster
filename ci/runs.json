@@ -1,6 +1,19 @@
 [
   {
     "conclusion": "failure",
+    "databaseId": 28743197671,
+    "event": "push",
+    "headBranch": "main",
+    "headSha": "6d5122bb8355d9676b1abeaa25f6dc9dc0fbd717",
+    "name": "CI",
+    "startedAt": "2026-07-05T13:58:48Z",
+    "status": "completed",
+    "updatedAt": "2026-07-05T13:59:38Z",
+    "url": "https://github.com/shrxvxn007/aster/actions/runs/28743197671",
+    "workflowName": "CI"
+  },
+  {
+    "conclusion": "failure",
     "databaseId": 28743014995,
     "event": "push",
     "headBranch": "main",
@@ -23,45 +36,6 @@
     "status": "completed",
     "updatedAt": "2026-07-05T13:24:34Z",
     "url": "https://github.com/shrxvxn007/aster/actions/runs/28742254439",
-    "workflowName": "CI"
-  },
-  {
-    "conclusion": "success",
-    "databaseId": 28742214754,
-    "event": "push",
-    "headBranch": "main",
-    "headSha": "7fba2622e8fa326b42436fe22a3c177f9d2fec1b",
-    "name": "CI",
-    "startedAt": "2026-07-05T13:22:22Z",
-    "status": "completed",
-    "updatedAt": "2026-07-05T13:23:10Z",
-    "url": "https://github.com/shrxvxn007/aster/actions/runs/28742214754",
-    "workflowName": "CI"
-  },
-  {
-    "conclusion": "success",
-    "databaseId": 28742054328,
-    "event": "push",
-    "headBranch": "main",
-    "headSha": "d76d4a0b9fdfd6c518f0ba87a6ac92790637f365",
-    "name": "CI",
-    "startedAt": "2026-07-05T13:16:28Z",
-    "status": "completed",
-    "updatedAt": "2026-07-05T13:17:23Z",
-    "url": "https://github.com/shrxvxn007/aster/actions/runs/28742054328",
-    "workflowName": "CI"
-  },
-  {
-    "conclusion": "failure",
-    "databaseId": 28741274470,
-    "event": "push",
-    "headBranch": "main",
-    "headSha": "8c220549d583a2c51a63787e15b2a340c8a6b9a0",
-    "name": "CI",
-    "startedAt": "2026-07-05T12:47:26Z",
-    "status": "completed",
-    "updatedAt": "2026-07-05T12:48:17Z",
-    "url": "https://github.com/shrxvxn007/aster/actions/runs/28741274470",
     "workflowName": "CI"
   }
 ]

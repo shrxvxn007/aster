@@ -1,1 +1,1 @@
-784f047 ci: re-enable UBSan coverage via -O1 Debug + ubuntu-only matrix
+6d5122b ci: offline-mirror ci/ + capture_ci.sh + README badge link

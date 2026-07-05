@@ -38,22 +38,28 @@ target_include_directories(aster_obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(aster_obj PUBLIC cxx_std_20)
 
 # Release: -O3, LTO, arch-tuned, NDEBUG.
-# Debug  : -O1 + ASan + UBSan + frame pointers. We deliberately use -O1
-# (not -O0) so the instrumented per-event loop still runs at meaningful
-# speed under ctest: at -O0 + ASan, the per-test wallclock was 30-50x
-# slower and the entire macOS ctest job timed out at the per-test default.
-# -O1 still triggers ASan and UBSan checks (sanitizers don't require -O0)
-# and still produces accurate stack traces via -fno-omit-frame-pointer.
+# Debug  : -O1 + UBSan + frame pointers. ASan was tried first but had two
+# distinct failure modes in CI: (1) at -O0 it inflated ctest per-event
+# wallclock 30-50x and timed out the 120-s cap; (2) at -O1 it still
+# produced instrumented binaries large enough that cold-ccache linking
+# flaked on the GH Actions runner ('Build' step failures). UBSan without
+# ASan simplifies the linker footprint (no ASan runtime, no shadow-memory
+# metadata), keeps per-test wallclock under 5 s on Linux gcc, AND
+# surfaces the runtime-error UB signal the user actually wants
+# (signed integer overflow, null pointer, alignment, invalid shift).
+# -O1 still triggers UBSan checks (sanitizers don't require -O0).
+# -fno-omit-frame-pointer produces accurate stack traces.
 # NB: -O1 may mask some UB paths that -O0 surfaces (compiler inlining /
-# constant propagation elides UB-free subpaths), so this is a known
-# tradeoff \u2014 the CI Debug matrix entry exists primarily as a fast
-# regression-detector, not a UB oracle.
+# constant propagation elides UB-free subpaths), so this is a practical
+# tradeoff: the CI Debug matrix entry is a fast UB-regression detector,
+# not a UB oracle. Before re-enabling ASan, audit the binary size + the
+# link-step memory ceiling on the GH Actions runner.
 target_compile_options(aster_obj PRIVATE
   $<$<CONFIG:Release>:-O3 ${ARCH_FLAG} -flto -DNDEBUG>
-  $<$<CONFIG:Debug>:-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:-O1 -g -fsanitize=undefined -fno-omit-frame-pointer>
 )
 target_link_options(aster_obj PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=address,undefined>
+  $<$<CONFIG:Debug>:-fsanitize=undefined>
 )
 target_link_libraries(aster_obj PUBLIC aster)
 
