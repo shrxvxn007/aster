@@ -77,9 +77,15 @@ class MatchingEngine {
   // Modifies an order. Cancel + re-add semantics: loses queue priority.
   [[nodiscard]] bool modify_order(OrderID id, Price new_price, Qty new_qty) noexcept;
 
-  // Historical execution: removes `qty` from the resting order `id`. If the fill
-  // completes the order, the order is removed from the book and pool. Returns
-  // the qty actually filled. Returns 0 if the order is not in the book.
+  // Historical execution: removes `qty` from the resting order `id`. If the
+  // fill completes the order, the order is removed from the book and pool.
+  // Returns the unfilled remainder (0 when `qty` was fully absorbed into the
+  // resting order; 0 also when the order is not in the book). The function's
+  // historical claim of "returns the qty actually filled" was wrong -- the
+  // test fixture (tests/test_engine.cpp:test_execute_order_historical_fill)
+  // has always keyed on `Qty unfilled = engine.execute_order(...); assert(unfilled == 0)`
+  // and the implementation in matching_engine.ipp has long matched that
+  // contract (`return qty - fill_qty`). The header was the laggard.
   [[nodiscard]] Qty execute_order(OrderID id, Qty qty, Timestamp ts) noexcept;
 
   Price best_bid(SymbolID s) const {
