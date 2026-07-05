@@ -230,15 +230,16 @@ Qty MatchingEngine<Callback>::execute_order_impl(Order* o, Qty qty,
       }
     }
   }
-  // Return the unfilled remainder (0 when `qty` was fully absorbed into the
-  // resting order). Mirrors the ITCH 'E' message's spirit: the caller ingests an
-  // external fill of size `qty`, and the engine reports how much residual
-  // remained on the resting order. Matches the test fixture's variable name
-  // (`Qty unfilled = engine.execute_order(...)` then `assert(unfilled == 0)`)
-  // AND the internal `execute_order_impl` declaration's "Returns unfilled qty"
-  // comment in matching_engine.hpp. NOTE: external docstring for execute_order
-  // (in the header) was historically "Returns the qty actually filled"; that
-  // has been corrected to read consistently.
+  // Return the unfilled remainder: caller ingests an external fill of size
+  // `qty` (e.g. ITCH 'E'); the engine reports how much residual remained on
+  // the resting order after applying it. Mirrors the test fixture's
+  // contract: `Qty unfilled = engine.execute_order(...); assert(unfilled == 0)`
+  // when the qty is fully absorbed.
+  //
+  // HISTORICAL NOTE: the previous impl returned `fill_qty` (the same qty the
+  // caller passed in for fully-filled cases -- a tautology for the common
+  // case), which was inconsistent with both the test fixture and the
+  // upstream header docstring. This change aligns all three.
   return qty - fill_qty;
 }
 
