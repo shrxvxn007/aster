@@ -168,38 +168,31 @@ add_test(NAME test_cli_flag_parser
 # <title> matches "CI - passing". Exits 2 on missing/malformed files, 1
 # on red matrix or stale badge, 0 on green.
 #
-# Why this block is wrapped in `if(EXISTS ...)`:
-#   The test must verify *something*, so it's only registered when the
-#   ci/ mirror artifacts (last_run_jobs.json + badge.svg) are present.
-#   This is the closest CTest equivalent of `EXCLUDE_FROM_ALL`:
-#     * Fresh clones / CI runners (no `gh auth` available, no capture
-#       run yet): configure-time check sees no ci/ artifacts, so the
-#       test is silently absent from ctest. Default `ctest` never runs
-#       it; the matrix is naturally green without per-workflow `-E`
-#       flags.
-#     * Local developer: run `scripts/capture_ci.sh`, then
-#       `cmake -B build && ctest -L ci` — the test exists, runs, and
-#       verifies the mirror.
+# Registered UNCONDITIONALLY (no `if(EXISTS ci/...)` guard) because
+# ci/last_run_jobs.json and ci/badge.svg are committed to the repo, so
+# the prior guard evaluated to true on every fresh CI clone and the
+# test got pulled into the default `ctest --output-on-failure` run in
+# `.github/workflows/ci.yml`. That created a chicken-and-egg deadlock:
+#   * the test asserts the mirror is green,
+#   * the mirror only updates when capture-ci.yml cron runs and
+#     captures the latest CI matrix state,
+#   * if the matrix itself was red, the mirror committed the red state
+#     and the test failed for the next run -> permanent red.
 #
-# `LABELS "ci"` is the test-level label (set via set_tests_properties
-# for CMake 3.16+ compat — `add_test(NAME ... LABELS ...)` keyword
-# syntax only landed in newer versions). The label lets developers run
-#   ctest -L ci         # only ci-labeled tests (this gate + future)
-#   ctest -L ^ci$       # unlabel, i.e. everything except "ci"
-# without editing CMakeLists.txt again.
+# CMake does not expose a per-test `EXCLUDE_FROM_ALL` (that flag only
+# affects build targets like `add_executable`), so the right gate lives
+# at the CTest invocation site:
+#   * `.github/workflows/ci.yml` excludes it by name (`-E test_ci_snapshot`)
+#     so the matrix never blocks on its own offline-mirror state. We use
+#     `-E <name>` (CMake 3.0+) rather than `--label-exclude` (3.20+) for
+#     compatibility with the older Apple CMake on macos-latest runners.
+#   * Local developer: `ctest -L ci` runs it on demand.
+#   * If ci/ artifacts are genuinely absent (e.g. a pre-capture clone),
+#     the test exits 2 with a clear error - no CMake-time gating needed.
 # -----------------------------------------------------------------------------
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ci/last_run_jobs.json"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ci/badge.svg")
-  add_test(NAME test_ci_snapshot
-           COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ci_snapshot.py
-                   --repo-root ${CMAKE_CURRENT_SOURCE_DIR}
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  )
-  set_tests_properties(test_ci_snapshot PROPERTIES LABELS "ci")
-else()
-  message(STATUS
-    "test_ci_snapshot: SKIPPED (ci/last_run_jobs.json + ci/badge.svg "
-    "absent — run scripts/capture_ci.sh to refresh, then reconfigure "
-    "with `cmake -B build` to register the gate)"
-  )
-endif()
+add_test(NAME test_ci_snapshot
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ci_snapshot.py
+                 --repo-root ${CMAKE_CURRENT_SOURCE_DIR}
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(test_ci_snapshot PROPERTIES LABELS "ci")

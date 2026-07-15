@@ -27,10 +27,15 @@ Purpose:
   The mirror + this snapshot check surface drift between commits and
   upstream CI in seconds rather than minutes.
 
-Wired via CMake `add_test` with EXCLUDE_FROM_ALL + LABELS "ci" so
-default `ctest --output-on-failure` does NOT invoke it (CI builds
-can't update ci/ - gh auth isn't viable inside the matrix), but
-`ctest -L ci` (or `ctest -R test_ci_snapshot`) does.
+Wired via CMake `add_test` with LABELS "ci" so `ctest -L ci` (or
+`ctest -R test_ci_snapshot`) runs it on demand. The matrix build
+in `.github/workflows/ci.yml` excludes this test by name via
+`ctest ... -E test_ci_snapshot` — CMake has no per-test
+EXCLUDE_FROM_ALL, so the skip must live in the ctest invocation.
+Allowing this test to run inside the matrix creates a chicken-and-egg
+deadlock: the mirror only refreshes via the cron in capture-ci.yml,
+so the matrix will never authoritatively fix a red mirror, only
+report on it.
 
 Usage:
   python3 tests/test_ci_snapshot.py

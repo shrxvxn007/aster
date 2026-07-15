@@ -85,7 +85,17 @@ jobs:
         # --timeout 120: per-test wallclock cap. 60s was flagged as borderline-
         # aggressive for any future contributor adding a slower test. 120s
         # gives ~2x headroom and still catches hangs.
-        run: ctest --output-on-failure --timeout 120
+        # -E test_ci_snapshot: skip the offline-mirror snapshot gate from
+        # the CI matrix. That mirror only updates via the cron in
+        # capture-ci.yml, and the matrix itself can't authoritatively
+        # rewrite it (no gh auth in the job), so allowing this test
+        # inside the matrix creates a chicken-and-egg deadlock (`matrix
+        # red` => `mirror reflects red` => `test always fails`). Local
+        # devs run `ctest -L ci` on demand to verify the mirror. We use
+        # `-E <name>` (CMake 3.0+) rather than `--label-exclude` (3.20+)
+        # for compatibility with the older Apple CMake on macos-latest
+        # GHA runners.
+        run: ctest --output-on-failure --timeout 120 -E test_ci_snapshot
 
       - name: ccache stats
         if: matrix.os == 'ubuntu-latest' && matrix.build_type == 'Release'
