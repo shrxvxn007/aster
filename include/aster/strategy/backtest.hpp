@@ -97,6 +97,7 @@ class Backtest {
   void handle_cancel(const replay::OrderCancelMsg& m, Timestamp recv_ts);
   void handle_delete(const replay::OrderDeleteMsg& m, Timestamp recv_ts);
   void handle_system(const replay::SystemEventMsg& m, Timestamp recv_ts);
+  void handle_l2(const replay::L2AggregateMsg& m, Timestamp recv_ts);
 
   // Update the per-symbol market-order arrival rate from an execute event.
   void update_arrival_rate(SymbolID sym, Qty qty, Timestamp ts);

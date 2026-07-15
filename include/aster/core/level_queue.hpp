@@ -27,6 +27,17 @@ class LevelQueue {
   // Direct adjust of total_qty_ by the matching engine after a partial fill.
   void adjust_total_qty(Qty delta) noexcept { total_qty_ -= delta; }
 
+  // Snap-to replacement of total_qty_. Used by the L2 replay path
+  // (Backtest::handle_l2) to commit the level's aggregate to the snapshot
+  // value carried in an L2AggregateMsg. Hot-path matching semantics are
+  // unaffected because match_against_level walks head→tail in qty_remaining
+  // order; total_qty_ is a cached view consumed by level_qty() and by the
+  // QueueTracker's per-(symbol, price) volume-ahead estimation. We do not
+  // touch head_/tail_ — an L2 snapshot overrides the cache, not the order
+  // chain. Pairs naturally with adjust_total_qty (subtract): the latter is
+  // the L3 incremental update, this is the L2 wholesale overwrite.
+  void override_total_qty(Qty qty) noexcept { total_qty_ = qty; }
+
   // Append to the tail — new order gets lowest priority at this price.
   void push_tail(Order* o) noexcept {
     assert(o != nullptr);

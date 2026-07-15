@@ -8,7 +8,9 @@
 // the Backtest class is fully defined.
 #include "aster/core/matching_engine.ipp"
 
+#include <algorithm>
 #include <cstdio>
+#include <functional>
 
 namespace aster::strategy {
 
@@ -53,6 +55,8 @@ void Backtest::run() {
                 handle_delete(m, recv_ts);
               else if constexpr (std::is_same_v<T, replay::SystemEventMsg>)
                 handle_system(m, recv_ts);
+              else if constexpr (std::is_same_v<T, replay::L2AggregateMsg>)
+                handle_l2(m, recv_ts);
             },
             msg);
       });
@@ -158,6 +162,73 @@ void Backtest::handle_delete(const replay::OrderDeleteMsg& m,
   SymbolID sym = o ? o->symbol : 0;
   (void)engine_.cancel_order(m.order_id);
   update_mark_to_market(sym);
+}
+
+void Backtest::handle_l2(const replay::L2AggregateMsg& m,
+                         Timestamp /*recv_ts*/) {
+  // Bounds guard: m.symbol must fit within the engine's pre-allocated
+  // book array. L2 packets referencing an unknown symbol are treated as
+  // data anomalies and ignored rather than crashing via out-of-bound
+  // access into engine_.books(). Note that sibling handle_add does NOT
+  // guard this explicitly — it relies on engine_.add_order's internal
+  // symbol check. We dereference engine_.books()[m.symbol] directly, so
+  // the unbounded vector operator[] warrants the explicit guard here.
+  if (m.symbol >= engine_.books().size()) return;
+
+  // Cross-side collision guard. OrderBook keyes `levels` by Price only
+  // (see include/aster/core/order_book.hpp:7-9), so a Buy order and a
+  // Sell order at the same price share one LevelQueue. If we blindly
+  // override total_qty for one side, we'd corrupt the cached aggregate
+  // for the *other* side at that price. We refuse to snap in either case:
+  //   (a) the price is in both `bids` AND `asks` (locked/crossed market —
+  //       rare on real tape; on those ticks the cache lags the truth).
+  //   (b) the L2 msg's own `side` does not match a side that has this
+  //       price in its sorted vector (data anomaly: a Sell-tagged message
+  //       arriving against a bid-only level would overwrite a bid-side
+  //       total with a sell-side number — actively wrong).
+  // On reject we also skip the queue-tracker decrement: when both sides
+  // collide OR the L2 side is unreliable, `old_total - m.qty` could
+  // equally reflect vanished bid-side or ask-side shares, and we cannot
+  // tell which. So the conservative answer is: no snap, no decrement.
+  const auto& book = engine_.books()[m.symbol];
+  const bool in_bids = std::binary_search(book.bids.begin(), book.bids.end(),
+                                          m.price, std::greater<Price>{});
+  const bool in_asks = std::binary_search(book.asks.begin(), book.asks.end(),
+                                          m.price);
+  const bool our_side_has =
+      (m.side == Side::Buy) ? in_bids : in_asks;
+  const bool other_side_has =
+      (m.side == Side::Buy) ? in_asks : in_bids;
+  if (!our_side_has || other_side_has) return;
+
+  // Read the level's current cached total. level_qty() returns 0 when
+  // the price is absent, so this works for pure-L2 streams (level empty
+  // because no L3 OrderAdd has populated it) as well as mixed-mode feeds.
+  Qty old_total = engine_.level_qty(m.symbol, m.price);
+  if (m.qty < old_total) {
+    // The exchange snapshot says fewer shares rest here than the engine's
+    // cached view. Some of those vanished shares may have been *ahead of*
+    // any agent orders sitting at this price level; decrement the queue
+    // tracker's volume_ahead accordingly so the next quoted mid reflects
+    // the actually observable ahead.
+    tracker_.on_level_event(m.symbol, m.price, old_total - m.qty);
+  }
+
+  // Snap the level's cached total to the L2 snapshot in both directions.
+  // For growth (m.qty > old_total) we *deliberately do NOT* grow any
+  // agent's volume_ahead: L2 carries no order IDs so we cannot know
+  // whether the fresh shares ended up ahead of or behind us, and picking
+  // wrong would create an artificially inflated fill-probability. The
+  // level's total_qty_ — used by engine_.level_qty() for fill-probability
+  // queries — is updated so the strategy still sees the level's true depth.
+  auto* lvl = engine_.books()[m.symbol].levels.find(m.price);
+  if (lvl) {
+    lvl->override_total_qty(m.qty);
+  }
+
+  // Update analytics' mark-to-market so unrealized PnL, drawdown, and the
+  // adverse-selection classifier see the new top-of-book on every L2 tick.
+  update_mark_to_market(m.symbol);
 }
 
 void Backtest::handle_system(const replay::SystemEventMsg& m,
