@@ -7,6 +7,15 @@
 # GHA runner. The offline CI mirror refresh lives in a separate
 # workflow file at .github/workflows/capture-ci.yml, triggered on a
 # 6-hour cron and via workflow_dispatch.
+#
+# A sanitizer compile/link drift check runs as a follow-up step after
+# every Build step (with `if: failure()`) so a mismatch between
+# target_compile_options's -fsanitize=… flag and target_link_options's
+# flag set fails the workflow with a precise message instead of a bare
+# `gmake: *** Error 2`. See scripts/check_sanitizer_drift.py for the
+# detector. The detector handles GNU ld, Clang LLD, and Apple ld (the
+# last as future-proofing if macOS-Debug is ever re-added to the
+# build matrix).
 
 name: CI
 
@@ -78,7 +87,16 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu)
+        run: cmake --build build --parallel $(nproc 2>/dev/null || sysctl -n hw.ncpu) 2>&1 | tee /tmp/build.log
+
+      # Sanitizer compile/link drift gate: runs only if the Build step
+      # above failed. Captures the link error pattern (e.g. __asan_init,
+      # __ubsan_handle_*) and reports which sanitizer family is
+      # compile-side-but-not-link-side so the fix is immediate. The tee
+      # in the Build step keeps /tmp/build.log around for this check.
+      - name: Sanitizer drift check
+        if: failure()
+        run: python3 scripts/check_sanitizer_drift.py /tmp/build.log
 
       - name: Test
         working-directory: build
@@ -127,7 +145,11 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        run: cmake --build build --parallel $(nproc)
+        run: cmake --build build --parallel $(nproc) 2>&1 | tee /tmp/build.log
+
+      - name: Sanitizer drift check
+        if: failure()
+        run: python3 scripts/check_sanitizer_drift.py /tmp/build.log
 
       - name: Run throughput floor check
         working-directory: build
