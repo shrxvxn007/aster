@@ -1,0 +1,3 @@
+2026-07-16T11:39:04Z
+CI retest marker — triggers a fresh workflow run on the ASan-free CMakeLists tree.
+Safe to delete. See git blame for original creation context.
