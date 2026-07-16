@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-generate_test_itch.py — write a small deterministic ITCH-style sample file.
+generate_test_itch.py — write a small deterministic Aster-flavour ITCH sample file.
 
 Produces `samples/test.itch` (configurable) containing:
   * a file header (`ITCH` magic, version=1, symbol_count=2)
@@ -46,7 +46,7 @@ def u32(v: int) -> bytes:
 
 
 def u48(v: int) -> bytes:
-    """ITCH 7-byte (56-bit) timestamp — we emit it big-endian in 7 bytes."""
+    """Aster-flavour ITCH 7-byte (56-bit) timestamp — we emit it big-endian in 7 bytes."""
     if not 0 <= v < (1 << 56):
         raise ValueError(f"u48: value {v} out of range")
     return v.to_bytes(7, "big")

@@ -1,4 +1,4 @@
-// Aster — ITCH parser implementation.
+// Aster — Aster-flavour ITCH parser implementation.
 
 #include "aster/replay/parser.hpp"
 #include "aster/replay/itch.hpp"

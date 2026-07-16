@@ -1,4 +1,4 @@
-// Aster — ITCH-style wire format.
+// Aster — Aster-flavour ITCH wire format.
 //
 // Binary, big-endian, fixed-size messages. File layout:
 //   [magic:4][version:4][symbol_count:4]
@@ -12,6 +12,25 @@
 //   'C' = Order Cancel (L3)
 //   'D' = Order Delete (L3)
 //   'L' = L2 Aggregate (price-level depth update)
+//
+// This format is a deliberate, documented subset of NASDAQ ITCH 5.0 —
+// NOT a byte-for-byte clone. Departures from the NASDAQ spec:
+//   * Timestamps are 7 bytes (56-bit) big-endian.
+//     NASDAQ ITCH 5.0: 6 bytes (48-bit) nanoseconds since midnight.
+//   * Symbols are referenced by a 2-byte SymbolID via the file-header
+//     symbol table (compact, multi-symbol friendly).
+//     NASDAQ ITCH 5.0: 8-byte StockLocate + 'R' Stock Directory messages
+//     carrying an 8-byte ASCII Stock name per symbol, dispatched inline.
+//   * A single 'A' Order Add carries the price (limit-order only).
+//     NASDAQ ITCH 5.0: 'A' is a market-order Add; price lives in a
+//     separate 'F' Order Add with MPID attribution message.
+//   * An 'L' L2 Aggregate carries price-level total qty + order count
+//     for fast depth reconciliation. NASDAQ ITCH 5.0 has no equivalent
+//     — its wire format is L3-only (Message-By-Order, MBO).
+//   * Six message types total: 'S','A','E','C','D','L'. NASDAQ ITCH 5.0
+//     defines 20+ types (cross trades, broken trades, NOII, Reg-SHO,
+//     Stock Trading Action, etc.); only the six above are needed by
+//     this matching engine.
 
 #pragma once
 

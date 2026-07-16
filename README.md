@@ -3,7 +3,7 @@
 [![CI status](ci/badge.svg)](ci/README.md)
 
 Aster is an event-driven limit order book and matching engine with an
-ITCH-style market-data replay harness and an inventory-aware market-making
+Aster-flavour ITCH market-data replay harness and an inventory-aware market-making
 strategy. The whole stack is C++20, allocation-free on the critical path,
 and profiles hot-path latency to nanosecond resolution.
 
@@ -11,7 +11,7 @@ The project maps directly to three production-style concerns:
 
 1. **Matching engine** — limit/market orders, cancels, modifies, partial
    fills, multi-symbol books, price-time priority, deterministic replay.
-2. **Replay engine** — ITCH-style L2/L3 events, configurable replay speed,
+2. **Replay engine** — Aster-flavour ITCH L2/L3 events, configurable replay speed,
    deterministic dispatch order, latency injection, exchange-delay
    simulation, nanosecond latency profiling.
 3. **Market-making strategy** — queue-position-aware quoting,
@@ -315,7 +315,7 @@ $ ./build/aster_sim --events 10000000
 Throughput: 30.85 M events/sec
 ```
 
-Across an in-memory ITCH-style replay the backtest callback path
+Across an in-memory Aster-flavour ITCH replay the backtest callback path
 (cli→parser→engine→strategy→analytics) profiles at:
 
 ```
@@ -327,6 +327,19 @@ with `--events 100000000` and stacks on Apple-silicon ~30 M events/s
 (Linux x86-64 SustainRelease sustains proportionally higher rates).
 Memory stays flat: the order pool is preallocated, the L2/strategy maps
 use open-addressed flat hash tables, and the critical path is allocation-free.
+
+A fully-deterministic 100M-event **replay pipeline** (parser + matching
+engine + L3 strategy + adverse-selection analytics) is captured offline
+via `python3 scripts/run_100m_backtest.py`. The committed result lives
+in
+[`tests/golden/analytics_100m.json`](tests/golden/analytics_100m.json)
+and is regenerated on demand via the same script. The pipeline writes
+a ~3 GB intermediate ITCH file to `/tmp`, replays it through
+`aster_replay --speed batch --pool-size 2_000_000`, and persists the
+Analytics block + tolerances as a JSON golden. Run-only, NOT a default
+CI gate — use it as the resume's "100M+ order-book events" re-runnable
+evidence; it complements the `aster_sim` throughput number above rather
+than replacing it.
 
 ---
 

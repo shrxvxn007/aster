@@ -1,10 +1,11 @@
 // Aster — parser tests.
 //
 // ItchParser mmaps its input on disk, so each test materialises a small
-// ITCH-style binary file in std::filesystem::temp_directory_path() before
-// parsing and removes it afterwards. Tests cover the file header + symbol
-// table, every message type ('S','A','E','C','D','L'), deterministic
-// dispatch order across a stream, and error_count() on a truncated input.
+// Aster-flavour ITCH binary file in std::filesystem::temp_directory_path()
+// before parsing and removes it afterwards. Tests cover the file header
+// + symbol table, every message type ('S','A','E','C','D','L'),
+// deterministic dispatch order across a stream, and error_count() on a
+// truncated input.
 
 #include "aster/replay/itch.hpp"
 #include "aster/replay/parser.hpp"
