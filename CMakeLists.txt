@@ -37,6 +37,10 @@ add_library(aster_obj OBJECT
 target_include_directories(aster_obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(aster_obj PUBLIC cxx_std_20)
 
+# Keep Debug sanitizer instrumentation in a single variable so compile/link
+# flags stay in lockstep and cannot drift across targets.
+set(ASTER_DEBUG_SANITIZER_FLAGS -fsanitize=undefined)
+
 # Release: -O3, LTO, arch-tuned, NDEBUG.
 # Debug  : -O1 + UBSan + frame pointers. ASan was tried first but had two
 # distinct failure modes in CI: (1) at -O0 it inflated ctest per-event
@@ -56,10 +60,10 @@ target_compile_features(aster_obj PUBLIC cxx_std_20)
 # link-step memory ceiling on the GH Actions runner.
 target_compile_options(aster_obj PRIVATE
   $<$<CONFIG:Release>:-O3 ${ARCH_FLAG} -flto -DNDEBUG>
-  $<$<CONFIG:Debug>:-O1 -g -fsanitize=undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:-O1 -g ${ASTER_DEBUG_SANITIZER_FLAGS} -fno-omit-frame-pointer>
 )
 target_link_options(aster_obj PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS}>
 )
 target_link_libraries(aster_obj PUBLIC aster)
 
@@ -67,14 +71,14 @@ target_link_libraries(aster_obj PUBLIC aster)
 add_executable(aster_replay src/main.cpp)
 target_link_libraries(aster_replay PRIVATE aster_obj aster)
 target_link_options(aster_replay PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS}>
 )
 
 # Synthetic benchmark: Poisson arrival process, no ITCH file required.
 add_executable(aster_sim src/sim.cpp)
 target_link_libraries(aster_sim PRIVATE aster_obj aster)
 target_link_options(aster_sim PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS}>
 )
 
 # -----------------------------------------------------------------------------
@@ -121,30 +125,30 @@ enable_testing()
 add_executable(test_engine tests/test_engine.cpp)
 target_link_libraries(test_engine PRIVATE aster_obj aster)
 target_compile_options(test_engine PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS} -fno-omit-frame-pointer>
 )
 target_link_options(test_engine PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS}>
 )
 add_test(NAME test_engine COMMAND test_engine)
 
 add_executable(test_parser tests/test_parser.cpp)
 target_link_libraries(test_parser PRIVATE aster_obj aster)
 target_compile_options(test_parser PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS} -fno-omit-frame-pointer>
 )
 target_link_options(test_parser PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS}>
 )
 add_test(NAME test_parser COMMAND test_parser)
 
 add_executable(test_replay tests/test_replay.cpp)
 target_link_libraries(test_replay PRIVATE aster_obj aster)
 target_compile_options(test_replay PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined -fno-omit-frame-pointer>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS} -fno-omit-frame-pointer>
 )
 target_link_options(test_replay PRIVATE
-  $<$<CONFIG:Debug>:-fsanitize=undefined>
+  $<$<CONFIG:Debug>:${ASTER_DEBUG_SANITIZER_FLAGS}>
 )
 add_test(NAME test_replay COMMAND test_replay)
 
